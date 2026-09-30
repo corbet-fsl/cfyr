@@ -1,0 +1,17 @@
+[package]
+name = "cfyr"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Foyer: the member half of cvld; sign in, handle, lobby, gate steps, credential renewal, devices"
+license = "FSL-1.1-ALv2"
+repository = "https://github.com/corbet-libs/cfyr"
+readme = "README.md"
+publish = false
+include = ["Cargo.toml", "src/**", "README.md", "LICENSE.md"]
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
