@@ -1,19 +1,25 @@
 # Agent instructions
 
-Write all code comments and documentation in English.
+Write code comments and documentation in English. Foyer is the device forwarding
+facade behind cmsg. It consumes cvld's generated owner client; it must not create a
+second registry, HTTP protocol, policy evaluator, membership store or server.
+Member, admin and root use the same owner forwarding boundary. cpky alone talks
+to WebAuthn and strips PRF; cjry owns enrolment and credential lifecycle.
 
-## Product boundary
+Reuse maintained upstream libraries and existing owner code before adding a new
+adapter. No cryptographic primitives, secret getters, PRF/root JSON, activity
+records, hidden mutable defaults or permissive authority. Runtime errors stay
+coarse and redact all request/session data. No GPL/AGPL dependency in this FSL
+facade. LICENSE.md defines FSL-1.1-ALv2.
 
-- Foyer: the member half of cvld; sign in, handle, lobby, gate steps, credential renewal, devices.
-- Part of `cvld`. Architecture and contract: `~/agents/todo/active/cvld-gate-architecture/CVLD-CONTRACTS.md` and `CVLD-V0.2.md` (v0.4 section) on the operator's machine; the contract for this crate is copied into `docs/CONTRACT.md` when implementation starts.
-- **Search before you write**: survey maintained crates first; prefer a thin facade over an established library; record candidates, choice and reasons in the README.
-- No own cryptographic primitives. No login dates, no request logs, no raw gate data.
-- Storage only through `crlt` (Turso/libSQL); one database per community with a community key in every table; every query index-backed.
-- This crate is FSL-1.1-ALv2. Do not add dependencies available only under GPL or AGPL.
+No workstation Cargo, including formatting/metadata. Use bounded public CI for
+public native and actual browser tests; expensive scale/load belongs on Crow.
+First-party dependencies declare branch main and resolve one revision per crate.
+Preserve reproducible Cargo.lock and refresh once per CI run for all jobs.
+Enforce complete reachable line and branch coverage, with only documented,
+source-specific justified exclusions. Native compilation is not wasm evidence.
 
-## Quality boundary
-
-- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `cargo check --target wasm32-unknown-unknown` must pass.
-- Do not build on the workstation. Push and let GitHub Actions run; read results with `gh run list` / `gh run view --log-failed`.
-- Tests: real round trips with libSQL (local file or in-memory), no mocks of our own logic; ample edge cases.
-- Commits: plain English, imperative; no AI attribution. Never publish to a registry.
+Commit small plain-English changes and stage explicit paths. Never publish to a
+registry. Do not add AI attribution or secret data. Require independent review
+of exact green backend commits; a scaffold or forwarding-only implementation
+is not enrolment, credential, restoration or product acceptance.
