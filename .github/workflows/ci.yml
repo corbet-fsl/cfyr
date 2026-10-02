@@ -265,7 +265,7 @@ jobs:
       run: "python3 -m pip install -r .github/requirements.txt\nsudo apt-get update -qq\nsudo apt-get\
         \ install -y caddy libcap2-bin\nsudo systemctl stop caddy || true\nsudo setcap cap_net_bind_service=+ep\
         \ \"$(command -v caddy)\"\nmkdir -m 700 .browser-tls\nopenssl req -x509 -newkey rsa:2048 -nodes\
-        \ -days 1 -subj /CN=wallet.example.test \\\n  -addext subjectAltName=DNS:wallet.example.test \\\
+        \ -days 1 -subj /CN=wallet.example.test \\\n  -addext subjectAltName=DNS:wallet.example.test,DNS:alpha.example.test,DNS:vault.alpha.example.test,DNS:api.alpha.example.test \\\
         \n  -keyout .browser-tls/key.pem -out .browser-tls/cert.pem 2>/dev/null\n"
     - uses: actions/download-artifact@v8
       with:
@@ -282,7 +282,7 @@ jobs:
         trap 'kill \"$fixture_pid\" 2>/dev/null || true' EXIT\nfor attempt in $(seq 1 120); do\n  test\
         \ -s browser-fixture.json && break\n  kill -0 \"$fixture_pid\"\n  sleep 1\ndone\ntest -s browser-fixture.json\n\
         cargo llvm-cov test --manifest-path tests/browser/Cargo.toml --locked --dep-coverage cfyr --test\
-        \ browser_client \\\n  --branch --coverage-target-only --target wasm32-unknown-unknown --json\
+        \ browser_client --test trust_browser \\\n  --branch --coverage-target-only --target wasm32-unknown-unknown --json\
         \ --output-path wasm-coverage.json \\\n  --ignore-filename-regex '(/tests/|/\\.github/coverage-runtime/)'\n"
     - name: Export browser source counters from the same execution
       if: always()

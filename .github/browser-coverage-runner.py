@@ -57,6 +57,10 @@ def main():
             raise RuntimeError("fixture must use an actual loopback door")
         if not re.fullmatch(r"http://127\.0\.0\.1:[0-9]+", fixture["faults"]):
             raise RuntimeError("fault proxy must use loopback")
+        if not re.fullmatch(r"http://127\.0\.0\.1:[0-9]+", fixture["trust_upstream"]):
+            raise RuntimeError("trust fixture must use the actual loopback community door")
+        trust_test = any(Path(arg).name.startswith("trust_browser-") for arg in sys.argv[1:])
+        page_host = "alpha.example.test" if trust_test else "wallet.example.test"
         tls = Path(".browser-tls").resolve()
         certificate, key = tls / "cert.pem", tls / "key.pem"
         config = tls / "Caddyfile"
@@ -85,7 +89,36 @@ https://wallet.example.test {
         reverse_proxy TEST_RUNNER
     }
 }
+https://alpha.example.test {
+    bind 127.0.0.1
+    tls CERT KEY
+    header Content-Type text/html
+    header Content-Security-Policy "default-src 'none'; frame-src https://vault.alpha.example.test; frame-ancestors 'none'"
+    respond "<html><title>Community fixture</title><iframe id='vault' src='https://vault.alpha.example.test/'></iframe></html>"
+}
+https://vault.alpha.example.test {
+    bind 127.0.0.1
+    tls CERT KEY
+    header Content-Security-Policy "frame-ancestors https://alpha.example.test"
+    handle /__trust_requests {
+        reverse_proxy FAULTS
+    }
+    handle /__fixture {
+        root * FIXTURE_ROOT
+        rewrite * /browser-fixture.json
+        file_server
+    }
+    handle {
+        reverse_proxy TEST_RUNNER
+    }
+}
+https://api.alpha.example.test {
+    bind 127.0.0.1
+    tls CERT KEY
+    reverse_proxy TRUST_UPSTREAM
+}
 """.replace("CERT", str(certificate)).replace("KEY", str(key))
+            .replace("TRUST_UPSTREAM", fixture["trust_upstream"])
             .replace("UPSTREAM", fixture["upstream"])
             .replace("FAULTS", fixture["faults"])
             .replace("FIXTURE_ROOT", str(fixture_path.parent)).replace("TEST_RUNNER", address))
@@ -111,11 +144,11 @@ https://wallet.example.test {
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--no-proxy-server")
-        options.add_argument("--host-resolver-rules=MAP wallet.example.test 127.0.0.1")
+        options.add_argument("--host-resolver-rules=MAP wallet.example.test 127.0.0.1, MAP alpha.example.test 127.0.0.1, MAP vault.alpha.example.test 127.0.0.1, MAP api.alpha.example.test 127.0.0.1")
         # Only this ephemeral fixture key is accepted; no global TLS bypass.
         options.add_argument("--ignore-certificate-errors-spki-list=" + pinned_fixture_key)
         options.set_capability("goog:loggingPrefs", {"browser": "ALL"})
-        driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+        driver = webdriver.Chrome(service=Service(os.environ.get("CHROMEDRIVER", "chromedriver")), options=options)
         driver.set_page_load_timeout(120)
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": """
             window.__coverageLog = [];
@@ -142,7 +175,13 @@ https://wallet.example.test {
                 return response;
             };
         """})
-        driver.get("https://wallet.example.test")
+        driver.get("https://" + page_host)
+        if trust_test:
+            if not driver.execute_script("return window.top === window && location.origin === 'https://alpha.example.test' && window.isSecureContext"):
+                raise RuntimeError("community UI must be the actual secure top-level fixture")
+            driver.switch_to.frame(driver.find_element("id", "vault"))
+            if not driver.execute_script("return window.top !== window && location.origin === 'https://vault.alpha.example.test' && window.isSecureContext"):
+                raise RuntimeError("Foyer must execute in the matching secure vault frame")
         deadline = time.monotonic() + 120
         state = {}
         while time.monotonic() < deadline:

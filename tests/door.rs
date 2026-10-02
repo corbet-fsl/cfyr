@@ -13,6 +13,52 @@ fn foyer(service: &Running, host: &str, session: Option<String>) -> Foyer<HttpCl
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn trusted_login_installs_a_session_and_exports_only_safe_identity_fields() {
+    let service = global(100).await;
+    for (host, bootstrap, role) in [
+        (WALLET, None, "member"),
+        (
+            ROOT,
+            Some("synthetic-operator-enrolment-capability"),
+            "root",
+        ),
+    ] {
+        let mut member = enrol(&service, host, bootstrap).await;
+        let request = login_request(
+            &service,
+            host,
+            &mut member.authenticator,
+            &member.user,
+            &member.credential,
+        )
+        .await;
+        let mut api = foyer(&service, host, None);
+        assert!(action("login_finish").is_none());
+        assert!(cfyr::contract()["paths"]["/v1/login_finish"].is_null());
+        assert!(matches!(
+            api.call("login_finish", request.clone()).await,
+            Err(Error::Invalid)
+        ));
+        let info = api.authenticate(request.clone()).await.unwrap();
+        assert_eq!(info.user, member.user);
+        assert_eq!(info.role, role);
+        assert!(info.expires > NOW);
+        let safe = serde_json::to_value(&info).unwrap();
+        assert!(safe.get("token").is_none());
+        assert_eq!(safe.as_object().unwrap().len(), 3);
+        assert!(matches!(
+            api.authenticate(request).await,
+            Err(Error::Unauthorized)
+        ));
+        api.call("logout", json!({})).await.unwrap();
+        assert!(matches!(
+            api.call("logout", json!({})).await,
+            Err(Error::Unauthorized)
+        ));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn public_member_and_root_requests_reach_the_real_owner() {
     let service = global(100).await;
     let mut public = foyer(&service, WALLET, None);

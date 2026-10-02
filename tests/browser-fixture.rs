@@ -19,13 +19,47 @@ use support::*;
 async fn main() {
     let path = std::env::args().nth(1).expect("fixture output path");
     let service = global(200).await;
+    let public = serde_json::from_value(
+        client(&service, WALLET, None)
+            .call("global_public", json!({}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let community = community("alpha", &public).await;
+    let feed = client(&community, "api.alpha.example.test", None)
+        .call("trust_feed", json!({}))
+        .await
+        .unwrap();
+    let traces = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let capture = traces.clone();
+    let trust_router = cvld::api::router(community.door.clone()).layer(axum::middleware::from_fn(
+        move |request: axum::extract::Request, next: axum::middleware::Next| {
+            let capture = capture.clone();
+            async move {
+                if request.method() == axum::http::Method::POST {
+                    capture.lock().unwrap().push(json!({
+                        "path": request.uri().path(),
+                        "authorization": request.headers().contains_key("authorization"),
+                        "cookie": request.headers().contains_key("cookie"),
+                        "referer": request.headers().contains_key("referer"),
+                    }));
+                }
+                next.run(request).await
+            }
+        },
+    ));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let trust_upstream = format!("http://{}", listener.local_addr().unwrap());
+    let trust_task =
+        tokio::spawn(async move { axum::serve(listener, trust_router).await.unwrap() });
     let mut member = enrol(&service, WALLET, None).await;
     client(&service, WALLET, Some(&member.session))
         .call("development_gate", json!({}))
         .await
         .unwrap();
     let mut sessions = Vec::new();
-    for _ in 0..11 {
+    for _ in 0..13 {
         sessions.push(
             login(
                 &service,
@@ -46,6 +80,13 @@ async fn main() {
     let stats = cases.clone();
     let upstream = service.base.clone();
     let router = Router::new()
+        .route(
+            "/__trust_requests",
+            get(move || {
+                let traces = traces.clone();
+                async move { Json(traces.lock().unwrap().clone()) }
+            }),
+        )
         .route(
             "/__faults",
             get(move || {
@@ -103,7 +144,28 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let faults = format!("http://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let data = json!({ "upstream": service.base, "faults": faults, "session": member.session, "fault_sessions": sessions });
+    let authentication = login_request(
+        &service,
+        WALLET,
+        &mut member.authenticator,
+        &member.user,
+        &member.credential,
+    )
+    .await;
+    let data = json!({
+        "upstream": service.base,
+        "faults": faults,
+        "session": member.session,
+        "fault_sessions": sessions,
+        "authentication": authentication,
+        "user": member.user,
+        "trust_upstream": trust_upstream,
+        "trust_configuration": {
+            "origin": "https://api.alpha.example.test",
+            "community": "alpha", "key_ring": feed["key_ring"],
+            "minimum_revision": 1, "ring_revision": 0,
+        },
+    });
     let temporary = format!("{path}.pending");
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -119,4 +181,5 @@ async fn main() {
     std::fs::rename(&temporary, &path).unwrap();
     tokio::signal::ctrl_c().await.unwrap();
     task.abort();
+    trust_task.abort();
 }

@@ -38,3 +38,13 @@ refusals, and damaged replies after actual logout commits. The three browser
 coverage reports come from that same actual execution; every emitted reachable
 Foyer line and branch is required. This does not qualify the Wallet proof engine
 or the encrypted Vault/Board credential handoff.
+
+`Foyer::call`, `action` and `contract` use the owner's forwarding projection:
+only explicitly `x-client-access=forward` operations are exposed. A raw
+login-finish response cannot leave the facade. Trusted composition calls
+`Foyer::authenticate` with the public assertion from cpky; the owner client
+installs the bearer in the same pinned transport and returns only
+`SessionInfo { user, role, expires }`. No server bearer is returned to the shell,
+and absent visibility metadata fails closed. This does not admit a member or
+replace Journey's lobby. Raw JSON duplicate keys must be rejected before the
+embedding converts its input to Value.

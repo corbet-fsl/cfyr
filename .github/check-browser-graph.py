@@ -21,3 +21,11 @@ features = nodes[owner['id']]
 if 'client-browser' not in features or features & {'server', 'development-gate', 'client-http'}:
     raise SystemExit('Browser consumer must use the actual portable door adapter')
 print('Browser consumer executes this Foyer and the original portable door')
+
+for name, feature in [('cnvy', 'browser')]:
+    packages = [p for p in metadata['packages'] if p['name'] == name]
+    if len(packages) != 1 or not re.fullmatch(r'git\+https://github\.com/corbet-foss/' + name + r'\?branch=main#[0-9a-f]{40}', packages[0]['source'] or ''):
+        raise SystemExit('Browser trust must use exactly one original owner main')
+    enabled = nodes[packages[0]['id']]
+    if feature not in enabled or 'http' in enabled:
+        raise SystemExit('Expected the original browser trust transport only')

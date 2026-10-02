@@ -22,6 +22,10 @@ browser-coverage-runtime = { path = "../../.github/coverage-runtime" }
 name = "browser_client"
 path = "browser_client.rs"
 
+[[test]]
+name = "trust_browser"
+path = "trust_browser.rs"
+
 [lints.rust]
 unsafe_code = "forbid"
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(owned_browser_coverage)"] }
