@@ -13,6 +13,19 @@ fn foyer(service: &Running, host: &str, session: Option<String>) -> Foyer<HttpCl
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn discoverable_browser_request_keeps_original_public_owner_options() {
+    let service = global(100).await;
+    let mut api = foyer(&service, WALLET, None);
+    let challenge = api.begin_browser_login().await.unwrap();
+    assert!(!challenge.ceremony.is_empty());
+    assert_eq!(challenge.options["publicKey"]["rpId"], WALLET);
+    assert!(matches!(
+        api.call("passport_challenge", json!({})).await,
+        Err(Error::Unauthorized)
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn trusted_login_installs_a_session_and_exports_only_safe_identity_fields() {
     let service = global(100).await;
     for (host, bootstrap, role) in [

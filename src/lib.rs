@@ -16,6 +16,11 @@ use serde_json::Value;
 
 /// Retained original Charter and Envoy composition for public community trust.
 pub mod trust;
+/// Device passkey owner. Foyer is its canonical facade home.
+pub use cpky as passkeys;
+#[cfg(not(target_arch = "wasm32"))]
+/// Public native browser challenge/assertion forwarding and retained session.
+pub mod login;
 
 /// Thin device facade over the original owner's client and transport.
 pub struct Foyer<T> {
