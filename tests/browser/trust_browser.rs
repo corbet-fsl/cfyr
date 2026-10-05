@@ -49,13 +49,33 @@ async fn vault_origin_uses_one_original_charter_over_real_cross_origin_https() {
     )
     .unwrap();
     let mut foyer = Foyer::with_trust(transport, trust);
-    assert!(foyer.current(NOW).is_err());
+    assert!(foyer.current(NOW, |_| ()).is_err());
     assert_eq!(foyer.trust().unwrap().state(), State::Stopped);
     foyer.trust().unwrap().start(|| NOW).await.unwrap();
-    assert_eq!(foyer.current(NOW).unwrap().community(), "alpha");
-    assert!(foyer.current(NOW).unwrap().valid_until() > NOW);
-    let revision = foyer.current(NOW).unwrap().revision();
-    let epoch = foyer.current(NOW).unwrap().policy_epoch();
+    let mut scoped = foyer.current_policy();
+    let mut reentrant = foyer.current_policy();
+    {
+        let _borrowed = foyer.trust().unwrap();
+        assert!(matches!(scoped.with_current(NOW, |_| ()), Err(Error::Busy)));
+    }
+    scoped
+        .with_current(NOW, |policy| {
+            assert_eq!(policy.community(), "alpha");
+            assert!(matches!(
+                reentrant.with_current(NOW, |_| ()),
+                Err(Error::Busy)
+            ));
+        })
+        .unwrap();
+    assert_eq!(
+        foyer
+            .current(NOW, |policy| policy.community().to_owned())
+            .unwrap(),
+        "alpha"
+    );
+    assert!(foyer.current(NOW, |policy| policy.valid_until()).unwrap() > NOW);
+    let revision = foyer.current(NOW, |policy| policy.revision()).unwrap();
+    let epoch = foyer.current(NOW, |policy| policy.policy_epoch()).unwrap();
     assert!(matches!(
         foyer.trust().unwrap().start(|| NOW).await,
         Err(Error::Busy)
@@ -63,22 +83,28 @@ async fn vault_origin_uses_one_original_charter_over_real_cross_origin_https() {
     assert!(!foyer.trust().unwrap().poll(|| NOW).await.unwrap());
     foyer.trust().unwrap().refresh(NOW).unwrap();
     assert!(foyer.trust().unwrap().poll(|| NOW).await.unwrap());
-    assert_eq!(foyer.current(NOW).unwrap().revision(), revision);
+    assert_eq!(
+        foyer.current(NOW, |policy| policy.revision()).unwrap(),
+        revision
+    );
     foyer.trust().unwrap().on_change(revision, NOW).unwrap();
     foyer
         .trust()
         .unwrap()
         .on_policy_epoch(epoch + 1, NOW)
         .unwrap();
-    assert!(matches!(foyer.current(NOW), Err(Error::Unavailable)));
+    assert!(matches!(
+        foyer.current(NOW, |_| ()),
+        Err(Error::Unavailable)
+    ));
     assert!(matches!(
         foyer.trust().unwrap().poll(|| NOW).await,
         Err(Error::BehindAnnouncement)
     ));
-    assert!(foyer.current(NOW + 60).is_err());
+    assert!(foyer.current(NOW + 60, |_| ()).is_err());
     foyer.trust().unwrap().stop();
     assert_eq!(foyer.trust().unwrap().state(), State::Stopped);
-    assert!(foyer.current(NOW + 61).is_err());
+    assert!(foyer.current(NOW + 61, |_| ()).is_err());
     let requests: Vec<serde_json::Value> = gloo_net::http::Request::get("/__trust_requests")
         .send()
         .await
@@ -93,4 +119,51 @@ async fn vault_origin_uses_one_original_charter_over_real_cross_origin_https() {
         assert_eq!(request["cookie"], false);
         assert_eq!(request["referer"], false);
     }
+    // The same original Foyer retains its public trust owner while its session
+    // is authenticated by the actual server. A weak port shares only this
+    // original session; it neither clones Trust nor derives a member from UUID.
+    let mut live = foyer.live_membership();
+    assert!(live.observe(|| NOW).await.is_err());
+    let info = foyer
+        .authenticate(fixture["membership_authentication"].clone())
+        .await
+        .unwrap();
+    let stamp = foyer.session_binding().unwrap();
+    stamp.check(&foyer, NOW).unwrap();
+    assert!(stamp.check(&foyer, info.expires).is_err());
+    let foreign = Foyer::new(
+        BrowserClient::new(
+            "https://api.alpha.example.test".into(),
+            "api.alpha.example.test".into(),
+            None,
+        )
+        .unwrap(),
+    );
+    assert!(stamp.check(&foreign, NOW).is_err());
+    let observed = live.observe(|| NOW).await.unwrap();
+    assert_eq!(
+        observed.member,
+        fixture["membership_pseudonym"].as_str().unwrap()
+    );
+    assert_ne!(observed.member, info.user);
+    assert_eq!(
+        observed.device_keys,
+        vec![serde_json::from_value::<[u8; 32]>(fixture["membership_device"].clone()).unwrap()]
+    );
+    assert!(live.observe(|| info.expires).await.is_err());
+    foyer
+        .call(
+            "passkey_revoke",
+            serde_json::json!({"credential": fixture["membership_credential"]}),
+        )
+        .await
+        .unwrap();
+    assert!(live.observe(|| NOW).await.is_err());
+    drop(foyer);
+    assert!(stamp.check(&foreign, NOW).is_err());
+    assert!(live.observe(|| NOW).await.is_err());
+    assert!(matches!(
+        scoped.with_current(NOW, |_| ()),
+        Err(Error::Unavailable)
+    ));
 }

@@ -184,17 +184,36 @@ async fn foyer_retains_one_real_charter_and_follows_without_session_identifiers(
     .unwrap();
     let mut foyer = Foyer::with_trust(transport, trust);
     let clock = || tls.clock.load(Ordering::SeqCst);
-    assert!(foyer.current(NOW).is_err());
+    assert!(foyer.current(NOW, |_| ()).is_err());
     assert_eq!(foyer.trust().unwrap().state(), State::Stopped);
     assert!(matches!(
         foyer.trust().unwrap().refresh(NOW),
         Err(Error::Stopped)
     ));
     foyer.trust().unwrap().start(clock).await.unwrap();
-    let revision = foyer.current(NOW).unwrap().revision();
-    let epoch = foyer.current(NOW).unwrap().policy_epoch();
-    assert_eq!(foyer.current(NOW).unwrap().community(), "alpha");
-    assert!(foyer.current(NOW).unwrap().valid_until() > NOW);
+    let mut scoped = foyer.current_policy();
+    let mut reentrant = foyer.current_policy();
+    {
+        let _borrowed = foyer.trust().unwrap();
+        assert!(matches!(scoped.with_current(NOW, |_| ()), Err(Error::Busy)));
+    }
+    scoped
+        .with_current(NOW, |_| {
+            assert!(matches!(
+                reentrant.with_current(NOW, |_| ()),
+                Err(Error::Busy)
+            ));
+        })
+        .unwrap();
+    let revision = foyer.current(NOW, |policy| policy.revision()).unwrap();
+    let epoch = foyer.current(NOW, |policy| policy.policy_epoch()).unwrap();
+    assert_eq!(
+        foyer
+            .current(NOW, |policy| policy.community().to_owned())
+            .unwrap(),
+        "alpha"
+    );
+    assert!(foyer.current(NOW, |policy| policy.valid_until()).unwrap() > NOW);
     let trace = tls.traces.recv().await.unwrap().to_lowercase();
     assert!(trace.starts_with("post /v1/trust_feed "));
     assert!(trace.ends_with("{}"));
@@ -226,23 +245,37 @@ async fn foyer_retains_one_real_charter_and_follows_without_session_identifiers(
             .unwrap()
             .starts_with("POST /v1/trust_changes ")
     );
-    assert!(matches!(foyer.current(NOW + 2), Err(Error::Unavailable)));
+    assert!(matches!(
+        foyer.current(NOW + 2, |_| ()),
+        Err(Error::Unavailable)
+    ));
     assert!(foyer.trust().unwrap().poll(clock).await.unwrap());
-    assert!(foyer.current(NOW + 2).unwrap().revision() > revision);
-    assert!(foyer.current(NOW + 2).unwrap().policy_epoch() > epoch);
+    assert!(foyer.current(NOW + 2, |policy| policy.revision()).unwrap() > revision);
+    assert!(
+        foyer
+            .current(NOW + 2, |policy| policy.policy_epoch())
+            .unwrap()
+            > epoch
+    );
     tls.traces.recv().await.unwrap();
-    let revision = foyer.current(NOW + 2).unwrap().revision();
+    let revision = foyer.current(NOW + 2, |policy| policy.revision()).unwrap();
     foyer.trust().unwrap().on_change(revision, NOW + 2).unwrap();
     foyer
         .trust()
         .unwrap()
         .on_policy_epoch(epoch, NOW + 2)
         .unwrap();
-    assert!(foyer.current(NOW + 2).is_ok());
-    assert!(foyer.current(NOW + 62).is_err());
-    assert!(foyer.current(NOW + 1).is_err());
+    assert!(foyer.current(NOW + 2, |_| ()).is_ok());
+    assert_eq!(
+        scoped
+            .with_current(NOW + 2, |policy| policy.revision())
+            .unwrap(),
+        revision
+    );
+    assert!(foyer.current(NOW + 62, |_| ()).is_err());
+    assert!(foyer.current(NOW + 1, |_| ()).is_err());
     foyer.trust().unwrap().stop();
-    assert!(foyer.current(NOW + 63).is_err());
+    assert!(foyer.current(NOW + 63, |_| ()).is_err());
     let mut absent = Foyer::new(
         HttpClient::new(
             community.base.clone(),
@@ -251,7 +284,53 @@ async fn foyer_retains_one_real_charter_and_follows_without_session_identifiers(
         )
         .unwrap(),
     );
-    assert!(matches!(absent.current(NOW), Err(Error::Unavailable)));
+    assert!(matches!(
+        absent.current(NOW, |_| ()),
+        Err(Error::Unavailable)
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scoped_policy_discards_result_when_the_actual_foyer_closes_inside_callback() {
+    let wallet = global(100).await;
+    let public = serde_json::from_value(
+        client(&wallet, WALLET, None)
+            .call("global_public", json!({}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let community = community("alpha", &public).await;
+    let tls = tls_door(&community).await;
+    let settings = trust_configuration(&community, &tls.origin).await;
+    let trust = Trust::native(settings, config(), std::slice::from_ref(&tls.root)).unwrap();
+    let transport = HttpClient::new(
+        community.base.clone(),
+        "api.alpha.example.test".into(),
+        None,
+    )
+    .unwrap();
+    let mut foyer = Some(Foyer::with_trust(transport, trust));
+    foyer
+        .as_mut()
+        .unwrap()
+        .trust()
+        .unwrap()
+        .start(|| NOW)
+        .await
+        .unwrap();
+    let mut port = foyer.as_ref().unwrap().current_policy();
+    assert!(matches!(
+        port.with_current(NOW, |_| {
+            drop(foyer.take());
+            1
+        }),
+        Err(Error::Unavailable)
+    ));
+    assert!(matches!(
+        port.with_current(NOW, |_| 2),
+        Err(Error::Unavailable)
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread")]

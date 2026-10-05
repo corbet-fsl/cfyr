@@ -27,6 +27,17 @@ async fn main() {
     )
     .unwrap();
     let community = community("alpha", &public).await;
+    let (_, passport, _) = wallet_passport(&service).await;
+    let mut community_member =
+        enrol_community(&community, "api.alpha.example.test", &passport).await;
+    let membership_authentication = login_request(
+        &community,
+        "api.alpha.example.test",
+        &mut community_member.authenticator,
+        &community_member.user,
+        &community_member.credential,
+    )
+    .await;
     let feed = client(&community, "api.alpha.example.test", None)
         .call("trust_feed", json!({}))
         .await
@@ -160,6 +171,10 @@ async fn main() {
         "authentication": authentication,
         "user": member.user,
         "trust_upstream": trust_upstream,
+        "membership_authentication": membership_authentication,
+        "membership_pseudonym": passport.pseudonym(&cpsd::CommunityId::new("alpha").unwrap()).to_hex(),
+        "membership_device": community_member.signing_key,
+        "membership_credential": community_member.credential,
         "trust_configuration": {
             "origin": "https://api.alpha.example.test",
             "community": "alpha", "key_ring": feed["key_ring"],

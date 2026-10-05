@@ -41,6 +41,6 @@ impl<T: SessionTransport> Foyer<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "../tests/cases/login.rs"]
 mod tests;
