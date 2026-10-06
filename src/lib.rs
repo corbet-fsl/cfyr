@@ -22,6 +22,8 @@ pub mod trust;
 pub use cpky as passkeys;
 /// Public browser challenge/assertion forwarding and retained session on both targets.
 pub mod login;
+/// Original public first-registration response, correlated with its first login.
+pub mod registration;
 /// Live membership observations through this Foyer's original retained session.
 pub mod membership;
 /// Scoped access to the one original current public trust owner.
