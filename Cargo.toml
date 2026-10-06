@@ -3,14 +3,53 @@ name = "cfyr"
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Foyer: the member half of cvld; sign in, handle, lobby, gate steps, credential renewal, devices"
+description = "Foyer: device forwarding to the owner-generated cvld door contract"
 license = "FSL-1.1-ALv2"
-repository = "https://github.com/corbet-libs/cfyr"
+repository = "https://git.corbet.ch/corbet-libs/cfyr.git"
 readme = "README.md"
 publish = false
-include = ["Cargo.toml", "src/**", "README.md", "LICENSE.md"]
+include = ["Cargo.toml", "src/**", "docs/**", "README.md", "LICENSE.md"]
+
+[features]
+default = ["http"]
+http = ["cvld/client-http", "cnvy/http"]
+browser = ["cvld/client-browser", "cnvy/browser"]
 
 [dependencies]
+cvld = { git = "https://git.corbet.ch/corbet-libs/cvld.git", branch = "v01", default-features = false, features = ["client"] }
+cnvy = { git = "https://git.corbet.ch/corbet-foss/cnvy.git", branch = "v01", default-features = false }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+futures = "0.3"
+cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "v01" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+url = "2"
+cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "v01", features = ["test-authenticator"] }
+cvld = { git = "https://git.corbet.ch/corbet-libs/cvld.git", branch = "v01", default-features = false, features = ["development-gate", "client-http"] }
+cmty = { git = "https://git.corbet.ch/corbet-libs/cmty.git", branch = "v01" }
+cpsd = { git = "https://git.corbet.ch/corbet-foss/cpsd.git", branch = "v01", default-features = false, features = ["storage"] }
+csgn = { git = "https://git.corbet.ch/corbet-foss/csgn.git", branch = "v01", features = ["libsql"] }
+cglb = { git = "https://git.corbet.ch/corbet-libs/cgbl.git", branch = "v01" }
+ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh.git", branch = "v01" }
+cvch = { git = "https://git.corbet.ch/corbet-foss/cvch.git", branch = "v01" }
+cpns = { git = "https://git.corbet.ch/corbet-foss/cpns.git", branch = "v01" }
+ed25519-dalek = { version = "2.2" }
+axum = { version = "0.8.9" }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+tempfile = "3"
+webauthn-authenticator-rs = { version = "0.5.5", default-features = false, features = ["softtoken"] }
+passkey = "0.4"
+async-trait = "0.1"
+futures-util = "0.3"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rcgen = { version = "0.13", features = ["crypto"] }
+
+[[example]]
+name = "browser-fixture"
+path = "tests/browser-fixture.rs"
+required-features = ["http"]
 
 [lints.rust]
 unsafe_code = "forbid"
