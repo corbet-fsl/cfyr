@@ -1,0 +1,4 @@
+# Operator policy: stable channel, never an exact Rust version.
+# Cargo.toml rust-version = "1.88" is MSRV only, not a toolchain pin.
+# No other tool pins required by this repo's gates.
+rust = "stable"

@@ -1,0 +1,22 @@
+schema = 1
+project = "cfyr"
+
+[checks.rust]
+kind = "commands"
+commands = [
+  ["rustc", "--version"],
+  ["cargo", "fmt", "--all", "--check"],
+  ["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"],
+  ["cargo", "test", "--locked"],
+  ["cargo", "check", "--locked", "--target", "wasm32-unknown-unknown"],
+]
+cache_tools = [["rustc", "-vV"], ["cargo", "--version"]]
+
+[render]
+tool_revision = "81ebac8e86e20bc93b69d5e912bbcb0c0d036d58"
+
+[jobs.verify]
+scheduler = "crow"
+checks = ["rust"]
+workflow = "repository-jobs"
+command = ["bash", ".ci/run-cached.sh"]
