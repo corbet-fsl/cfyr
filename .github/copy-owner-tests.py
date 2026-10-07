@@ -10,7 +10,7 @@ owners = [package for package in metadata['packages'] if package['name'] == 'cvl
 if len(owners) != 1:
     raise SystemExit('Expected exactly one resolved door owner')
 owner = owners[0]
-if not re.fullmatch(r'git\+https://github\.com/corbet-libs/cvld\?branch=main#[0-9a-f]{40}', owner['source']):
+if not re.fullmatch(r'git\+https://git\.corbet\.ch/corbet-libs/cvld\?branch=main#[0-9a-f]{40}', owner['source']):
     raise SystemExit('Expected a resolved main revision of the door owner')
 source = Path(owner['manifest_path']).parent.resolve()
 destination = Path('tests/owner')
