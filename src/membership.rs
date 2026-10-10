@@ -2,7 +2,7 @@
 use crate::{Error, Foyer, Result, SessionInfo, Transport};
 use futures::{
     future::{AbortHandle, Abortable},
-    lock::Mutex,
+    lock::{Mutex, OwnedMutexGuard},
 };
 use std::{
     cell::RefCell,
@@ -21,7 +21,7 @@ struct Lifetime {
     pending: Option<AbortHandle>,
 }
 pub(crate) struct Shared<T> {
-    pub(crate) session: Mutex<Retained<T>>,
+    pub(crate) session: std::sync::Arc<Mutex<Retained<T>>>,
     lifetime: RefCell<Lifetime>,
 }
 impl<T> Shared<T> {
@@ -42,11 +42,11 @@ impl<T> Shared<T> {
 impl<T: Transport> Shared<T> {
     pub(crate) fn new(transport: T) -> Self {
         Self {
-            session: Mutex::new(Retained {
+            session: std::sync::Arc::new(Mutex::new(Retained {
                 client: cvld::client::Client::new(transport),
                 info: None,
                 authentication: 0,
-            }),
+            })),
             lifetime: RefCell::default(),
         }
     }
@@ -67,6 +67,78 @@ pub struct Observation {
 /// actions, expose a bearer or keep the owning Foyer alive. Dropping that Foyer
 /// cancels pending reads, including their original transport futures.
 pub struct LiveMembership<T>(Weak<Shared<T>>);
+
+/// One original live observation retaining the exact local session lock. It
+/// cannot be built from public Observation data or extend remote authority.
+/// The composer holds it across its owned checkpoint await and checks it again
+/// before publication; current signed Policy must still be borrowed separately.
+pub struct MembershipLease<T> {
+    owner: Weak<Shared<T>>,
+    held: OwnedMutexGuard<Retained<T>>,
+    authentication: u64,
+    user: String,
+    observation: Observation,
+    checked_at: Option<u64>,
+    _pending: Pending<T>,
+}
+
+pub(crate) struct RegistrationCheck<'a, T> {
+    pub(crate) owner: &'a Weak<Shared<T>>,
+    pub(crate) authentication: u64,
+    pub(crate) user: &'a str,
+    pub(crate) expires: u64,
+    pub(crate) floor: u64,
+}
+
+impl<T> MembershipLease<T> {
+    /// Existing public observation only, never a current-authority verdict.
+    pub fn observation(&self) -> &Observation {
+        &self.observation
+    }
+
+    /// Bound synchronous validation after the composer's await. The held guard
+    /// is inspected directly: re-locking this session would deadlock. Refusal is
+    /// terminal, and the original exclusive deadline is never renewed.
+    pub fn check(&mut self, mut clock: impl FnMut() -> u64) -> Result<u64> {
+        let floor = self.checked_at.take().ok_or(Error::Unauthorized)?;
+        let now = clock();
+        let owner = self.owner.upgrade().ok_or(Error::Unavailable)?;
+        let info = self.held.info.as_ref().ok_or(Error::Unauthorized)?;
+        if owner.is_closed()
+            || now < floor
+            || now >= self.observation.expires
+            || self.held.authentication != self.authentication
+            || info.user != self.user
+            || info.role != "member"
+            || info.expires != self.observation.expires
+        {
+            return Err(Error::Unauthorized);
+        }
+        self.checked_at = Some(now);
+        Ok(now)
+    }
+
+    pub(crate) fn check_registered(
+        &mut self,
+        expected: RegistrationCheck<'_, T>,
+        clock: impl FnMut() -> u64,
+    ) -> Result<u64> {
+        let now = self.check(clock)?;
+        if !self.owner.ptr_eq(expected.owner)
+            || self.authentication != expected.authentication
+            || self.user != expected.user
+            || self.observation.expires != expected.expires
+            || now < expected.floor
+        {
+            return Err(Error::Unauthorized);
+        }
+        Ok(now)
+    }
+
+    fn into_observation(self) -> Observation {
+        self.observation
+    }
+}
 
 impl<T> Foyer<T> {
     /// Give the trusted custody composer only the original live membership read
@@ -97,7 +169,19 @@ impl<T: Transport> LiveMembership<T> {
     /// has no authenticated deadline here: this port requires original login.
     /// The trusted composer supplies Unix seconds and must still verify current
     /// record lineage and exact one-use intent before authorizing Keys.
-    pub async fn observe(&mut self, mut clock: impl FnMut() -> u64) -> Result<Observation> {
+    pub async fn observe(&mut self, clock: impl FnMut() -> u64) -> Result<Observation> {
+        self.observe_lease(clock)
+            .await
+            .map(MembershipLease::into_observation)
+    }
+
+    /// Retain the original Foyer session while the trusted composer commits its
+    /// checkpoint. This freezes only local replacement/logout, not server state.
+    /// Cancellation drops the real guard and the pending original observation.
+    pub async fn observe_lease(
+        &mut self,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<MembershipLease<T>> {
         let shared = self.0.upgrade().ok_or(Error::Unavailable)?;
         let (abort, registration) = AbortHandle::new_pair();
         let generation = {
@@ -112,18 +196,20 @@ impl<T: Transport> LiveMembership<T> {
             lifetime.pending = Some(abort);
             lifetime.generation
         };
-        let _pending = Pending {
+        let pending = Pending {
             shared: self.0.clone(),
             generation,
         };
         let started = clock();
         let observed = Abortable::new(
             async {
-                let mut retained = shared.session.lock().await;
+                let mut retained = shared.session.clone().lock_owned().await;
                 let info = retained.info.as_ref().ok_or(Error::Unauthorized)?;
                 let expires = info.expires;
+                let user = info.user.clone();
+                let authentication = retained.authentication;
                 let sending = clock();
-                if sending < started || sending >= expires {
+                if info.role != "member" || sending < started || sending >= expires {
                     return Err(Error::Unauthorized);
                 }
                 let lobby = retained
@@ -147,10 +233,18 @@ impl<T: Transport> LiveMembership<T> {
                 let device_keys =
                     serde_json::from_value(keys.get("keys").cloned().ok_or(Error::Reconcile)?)
                         .map_err(|_| Error::Reconcile)?;
-                Ok(Observation {
-                    member,
-                    device_keys,
-                    expires,
+                Ok(MembershipLease {
+                    owner: self.0.clone(),
+                    held: retained,
+                    authentication,
+                    user,
+                    observation: Observation {
+                        member,
+                        device_keys,
+                        expires,
+                    },
+                    checked_at: Some(finished),
+                    _pending: pending,
                 })
             },
             registration,

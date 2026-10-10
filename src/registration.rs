@@ -43,6 +43,25 @@ pub struct RegisteredMember<T> {
     completed: Completed,
 }
 
+struct PinnedSession {
+    authentication: u64,
+    user: String,
+    expires: u64,
+    last_checked: u64,
+}
+
+/// Consume-only continuation of an original registration and its exact next
+/// successful member login. This is session correlation, never Keys permission,
+/// admission, a passkey certificate or current lineage authority.
+///
+/// The trusted composer checks this owner around its original Foyer calls and
+/// consumes it at the final handover. Cancellation or refusal permanently loses
+/// the continuation without changing the Foyer's original session.
+pub struct RegisteredSession<T> {
+    owner: Weak<Shared<T>>,
+    pinned: Option<PinnedSession>,
+}
+
 impl<T: Transport> Foyer<T> {
     /// Begin original first-member registration with an optional original Wallet
     /// presentation. Operator bootstrap is deliberately absent from this path.
@@ -123,6 +142,20 @@ impl<T: Transport> Foyer<T> {
 }
 
 impl<T> RegisteredMember<T> {
+    /// Retain sealed registration provenance through subsequent original Foyer
+    /// operations. Only the successful next login on this same owner can bind it;
+    /// a copied bearer, supplied SessionInfo or later replacement cannot do so.
+    /// No certificate bytes or vault custody are inferred from this handover.
+    pub async fn continue_after_login(
+        self,
+        owner: &Foyer<T>,
+        clock: impl FnMut() -> u64,
+    ) -> Result<RegisteredSession<T>> {
+        self.first_session(owner, clock)
+            .await
+            .map(|(continued, _)| continued)
+    }
+
     /// Consume this public registration receipt after the next successful login
     /// identifies this registered member in this same Foyer. No copied bearer or
     /// caller-supplied SessionInfo can satisfy this correlation. A failed login,
@@ -132,8 +165,18 @@ impl<T> RegisteredMember<T> {
     pub async fn into_certificate(
         self,
         owner: &Foyer<T>,
-        mut clock: impl FnMut() -> u64,
+        clock: impl FnMut() -> u64,
     ) -> Result<Option<Vec<u8>>> {
+        self.first_session(owner, clock)
+            .await
+            .map(|(_, certificate)| certificate)
+    }
+
+    async fn first_session(
+        self,
+        owner: &Foyer<T>,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<(RegisteredSession<T>, Option<Vec<u8>>)> {
         if !self.owner.ptr_eq(&Rc::downgrade(&owner.shared)) || owner.shared.is_closed() {
             return Err(Error::Unauthorized);
         }
@@ -151,7 +194,93 @@ impl<T> RegisteredMember<T> {
         {
             return Err(Error::Unauthorized);
         }
-        Ok(self.completed.certificate)
+        let certificate = self.completed.certificate;
+        let continued = RegisteredSession {
+            owner: self.owner,
+            pinned: Some(PinnedSession {
+                authentication: retained.authentication,
+                user: self.completed.user,
+                expires: info.expires,
+                last_checked: now,
+            }),
+        };
+        Ok((continued, certificate))
+    }
+}
+
+impl<T> RegisteredSession<T> {
+    /// Join this original registration to the retained original membership
+    /// session without acquiring its mutex again. This checks provenance and
+    /// time only; it grants no Keys operation or certificate authority.
+    pub fn check_with_lease(
+        &mut self,
+        lease: &mut crate::membership::MembershipLease<T>,
+        clock: impl FnMut() -> u64,
+    ) -> Result<()> {
+        let mut pinned = self.pinned.take().ok_or(Error::Unauthorized)?;
+        let checked = lease.check_registered(
+            crate::membership::RegistrationCheck {
+                owner: &self.owner,
+                authentication: pinned.authentication,
+                user: &pinned.user,
+                expires: pinned.expires,
+                floor: pinned.last_checked,
+            },
+            clock,
+        )?;
+        pinned.last_checked = checked;
+        self.pinned = Some(pinned);
+        Ok(())
+    }
+
+    /// Consume the registration at the final checkpoint/publication boundary
+    /// while the same local session is still retained by the original lease.
+    pub fn consume_with_lease(
+        mut self,
+        lease: &mut crate::membership::MembershipLease<T>,
+        clock: impl FnMut() -> u64,
+    ) -> Result<()> {
+        self.check_with_lease(lease, clock)
+    }
+
+    /// Recheck the exact original session after an external await. Taking the
+    /// private state before waiting makes cancelled and refused checks terminal;
+    /// a later check cannot revive the continuation or renew its deadline.
+    pub async fn check(&mut self, owner: &Foyer<T>, mut clock: impl FnMut() -> u64) -> Result<()> {
+        let mut pinned = self.pinned.take().ok_or(Error::Unauthorized)?;
+        if !self.owner.ptr_eq(&Rc::downgrade(&owner.shared)) || owner.shared.is_closed() {
+            return Err(Error::Unauthorized);
+        }
+        let started = clock();
+        if started < pinned.last_checked || started >= pinned.expires {
+            return Err(Error::Unauthorized);
+        }
+        let retained = owner.shared.session.lock().await;
+        let now = clock();
+        if owner.shared.is_closed() || now < started || now >= pinned.expires {
+            return Err(Error::Unauthorized);
+        }
+        let info = retained.info.as_ref().ok_or(Error::Unauthorized)?;
+        if retained.authentication != pinned.authentication
+            || info.user != pinned.user
+            || info.role != "member"
+            || info.expires != pinned.expires
+        {
+            return Err(Error::Unauthorized);
+        }
+        pinned.last_checked = now;
+        self.pinned = Some(pinned);
+        Ok(())
+    }
+
+    /// Consume this continuation only after one last original owner, session and
+    /// clock check. Success grants no Keys operation or certificate authority.
+    pub async fn consume_checked(
+        mut self,
+        owner: &Foyer<T>,
+        clock: impl FnMut() -> u64,
+    ) -> Result<()> {
+        self.check(owner, clock).await
     }
 }
 

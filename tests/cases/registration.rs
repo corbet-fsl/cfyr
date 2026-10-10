@@ -196,3 +196,158 @@ async fn receipt_refused_after_same_member_replaces_first_session() {
         Err(Error::Unauthorized)
     ));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sealed_continuation_survives_original_calls_without_changing_the_session() {
+    let service = global(100).await;
+    let (mut api, receipt, mut authenticator) = registered(&service).await;
+    first_login(&mut api, &mut authenticator).await;
+    let stamp = api.session_binding().unwrap();
+    let mut continued = receipt.continue_after_login(&api, || NOW).await.unwrap();
+    continued.check(&api, || NOW).await.unwrap();
+    api.call("global_public", json!({})).await.unwrap();
+    continued.check(&api, || NOW + 1).await.unwrap();
+    continued.consume_checked(&api, || NOW + 1).await.unwrap();
+    stamp.check(&api, NOW + 1).unwrap();
+    api.call("logout", json!({})).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn continuation_requires_the_exact_first_login_before_binding() {
+    let service = global(100).await;
+    for replaced in [false, true] {
+        let (mut api, receipt, mut authenticator) = registered(&service).await;
+        if replaced {
+            first_login(&mut api, &mut authenticator).await;
+            first_login(&mut api, &mut authenticator).await;
+        }
+        assert!(matches!(
+            receipt.continue_after_login(&api, || NOW).await,
+            Err(Error::Unauthorized)
+        ));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn continued_session_refuses_replacement_failed_login_logout_and_owner_close() {
+    let service = global(100).await;
+    for failure in 0..4 {
+        let (mut api, receipt, mut authenticator) = registered(&service).await;
+        first_login(&mut api, &mut authenticator).await;
+        let mut continued = receipt.continue_after_login(&api, || NOW).await.unwrap();
+        match failure {
+            0 => {
+                first_login(&mut api, &mut authenticator).await;
+            }
+            1 => {
+                assert!(api.authenticate(json!({})).await.is_err());
+            }
+            2 => {
+                api.call("logout", json!({})).await.unwrap();
+            }
+            3 => api.shared.close(),
+            _ => unreachable!(),
+        }
+        assert!(matches!(
+            continued.check(&api, || NOW).await,
+            Err(Error::Unauthorized)
+        ));
+        assert!(matches!(
+            continued.check(&api, || NOW).await,
+            Err(Error::Unauthorized)
+        ));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn foreign_foyer_refusal_consumes_only_the_original_continuation() {
+    let service = global(100).await;
+    let (mut api, receipt, mut authenticator) = registered(&service).await;
+    first_login(&mut api, &mut authenticator).await;
+    let stamp = api.session_binding().unwrap();
+    let mut continued = receipt.continue_after_login(&api, || NOW).await.unwrap();
+    let foreign =
+        Foyer::new(crate::HttpClient::new(service.base.clone(), WALLET.into(), None).unwrap());
+    assert!(matches!(
+        continued.check(&foreign, || NOW).await,
+        Err(Error::Unauthorized)
+    ));
+    assert!(matches!(
+        continued.check(&api, || NOW).await,
+        Err(Error::Unauthorized)
+    ));
+    stamp.check(&api, NOW).unwrap();
+    assert!(matches!(
+        foreign.session_binding(),
+        Err(Error::Unauthorized)
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn continued_mutex_wait_rechecks_deadline_and_clock_without_revival() {
+    let service = global(100).await;
+    for expiry in [false, true] {
+        let (mut api, receipt, mut authenticator) = registered(&service).await;
+        let info = first_login(&mut api, &mut authenticator).await;
+        let stamp = api.session_binding().unwrap();
+        let mut continued = receipt.continue_after_login(&api, || NOW).await.unwrap();
+        let held = api.shared.session.lock().await;
+        let mut calls = 0;
+        let mut check = Box::pin(continued.check(&api, || {
+            calls += 1;
+            if calls == 1 {
+                NOW
+            } else if expiry {
+                info.expires
+            } else {
+                NOW - 1
+            }
+        }));
+        assert!(futures::poll!(check.as_mut()).is_pending());
+        drop(held);
+        assert!(matches!(check.await, Err(Error::Unauthorized)));
+        assert_eq!(calls, 2);
+        assert!(matches!(
+            continued.check(&api, || NOW).await,
+            Err(Error::Unauthorized)
+        ));
+        stamp.check(&api, NOW).unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelled_continuation_check_cannot_return_to_the_first_session() {
+    let service = global(100).await;
+    let (mut api, receipt, mut authenticator) = registered(&service).await;
+    first_login(&mut api, &mut authenticator).await;
+    let stamp = api.session_binding().unwrap();
+    let mut continued = receipt.continue_after_login(&api, || NOW).await.unwrap();
+    let held = api.shared.session.lock().await;
+    let mut check = Box::pin(continued.check(&api, || NOW));
+    assert!(futures::poll!(check.as_mut()).is_pending());
+    drop(check);
+    drop(held);
+    assert!(matches!(
+        continued.consume_checked(&api, || NOW).await,
+        Err(Error::Unauthorized)
+    ));
+    stamp.check(&api, NOW).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn continued_clock_floor_and_final_consumption_use_the_original_deadline() {
+    let service = global(100).await;
+    for rollback in [false, true] {
+        let (mut api, receipt, mut authenticator) = registered(&service).await;
+        let info = first_login(&mut api, &mut authenticator).await;
+        let stamp = api.session_binding().unwrap();
+        let mut continued = receipt.continue_after_login(&api, || NOW).await.unwrap();
+        continued.check(&api, || NOW + 1).await.unwrap();
+        let time = if rollback { NOW } else { info.expires };
+        assert!(matches!(
+            continued.consume_checked(&api, || time).await,
+            Err(Error::Unauthorized)
+        ));
+        stamp.check(&api, NOW).unwrap();
+    }
+}
