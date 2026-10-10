@@ -44,10 +44,12 @@ async fn registered(
         .unwrap()
         .into_parts();
     drop(custody);
+    let original_id = public.credential_id().unwrap();
     let receipt = api
         .finish_member_registration(pending, public)
         .await
         .unwrap();
+    assert_eq!(receipt.original_credential_id(), original_id.as_slice());
     (api, receipt, authenticator)
 }
 
@@ -350,4 +352,28 @@ async fn continued_clock_floor_and_final_consumption_use_the_original_deadline()
         ));
         stamp.check(&api, NOW).unwrap();
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn original_registration_key_id_survives_next_login_and_terminal_refusal() {
+    let service = global(100).await;
+    let (mut api, receipt, mut authenticator) = registered(&service).await;
+    let original = receipt.original_credential_id().to_vec();
+    first_login(&mut api, &mut authenticator).await;
+    let mut continued = receipt.continue_after_login(&api, || NOW).await.unwrap();
+    assert_eq!(
+        continued.original_credential_id().unwrap(),
+        original.as_slice()
+    );
+    continued.check(&api, || NOW + 1).await.unwrap();
+    assert_eq!(
+        continued.original_credential_id().unwrap(),
+        original.as_slice()
+    );
+    api.call("logout", json!({})).await.unwrap();
+    assert!(continued.check(&api, || NOW + 2).await.is_err());
+    assert!(continued.original_credential_id().is_err());
+    first_login(&mut api, &mut authenticator).await;
+    assert!(continued.check(&api, || NOW + 3).await.is_err());
+    assert!(continued.original_credential_id().is_err());
 }

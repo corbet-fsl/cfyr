@@ -41,6 +41,7 @@ pub struct RegisteredMember<T> {
     owner: Weak<Shared<T>>,
     authentication: u64,
     completed: Completed,
+    original_id: Vec<u8>,
 }
 
 struct PinnedSession {
@@ -48,6 +49,7 @@ struct PinnedSession {
     user: String,
     expires: u64,
     last_checked: u64,
+    original_id: Vec<u8>,
 }
 
 /// Consume-only continuation of an original registration and its exact next
@@ -116,6 +118,7 @@ impl<T: Transport> Foyer<T> {
         {
             return Err(Error::Unauthorized);
         }
+        let original_id = credential.credential_id().map_err(|_| Error::Invalid)?;
         let value = retained
             .client
             .forward(
@@ -137,11 +140,18 @@ impl<T: Transport> Foyer<T> {
             owner: pending.owner,
             authentication: pending.authentication,
             completed,
+            original_id,
         })
     }
 }
 
 impl<T> RegisteredMember<T> {
+    /// Exact original public credential ID, retained only after successful
+    /// server registration. It grants no currentness or custody permission.
+    pub fn original_credential_id(&self) -> &[u8] {
+        &self.original_id
+    }
+
     /// Retain sealed registration provenance through subsequent original Foyer
     /// operations. Only the successful next login on this same owner can bind it;
     /// a copied bearer, supplied SessionInfo or later replacement cannot do so.
@@ -202,6 +212,7 @@ impl<T> RegisteredMember<T> {
                 user: self.completed.user,
                 expires: info.expires,
                 last_checked: now,
+                original_id: self.original_id,
             }),
         };
         Ok((continued, certificate))
@@ -209,6 +220,12 @@ impl<T> RegisteredMember<T> {
 }
 
 impl<T> RegisteredSession<T> {
+    /// Original registered key's public ID, never a current certificate verdict.
+    /// A cancelled, consumed or refused continuation cannot expose this relation.
+    pub fn original_credential_id(&self) -> Result<&[u8]> {
+        Ok(&self.pinned.as_ref().ok_or(Error::Unauthorized)?.original_id)
+    }
+
     /// Join this original registration to the retained original membership
     /// session without acquiring its mutex again. This checks provenance and
     /// time only; it grants no Keys operation or certificate authority.
