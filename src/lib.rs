@@ -22,12 +22,12 @@ pub mod trust;
 pub use cpky as passkeys;
 /// Public browser challenge/assertion forwarding and retained session on both targets.
 pub mod login;
-/// Original public first-registration response, correlated with its first login.
-pub mod registration;
 /// Live membership observations through this Foyer's original retained session.
 pub mod membership;
 /// Scoped access to the one original current public trust owner.
 pub mod policy;
+/// Original public first-registration response, correlated with its first login.
+pub mod registration;
 /// Opaque correlation with one original successful session installation.
 pub mod session;
 
@@ -91,6 +91,7 @@ impl<T: Transport> Foyer<T> {
         // custody handover even if its reply or waiter is lost.
         if action == "logout" {
             retained.info = None;
+            retained.login_credential = None;
         }
         retained.client.forward(action, request).await
     }
@@ -100,16 +101,26 @@ impl<T: SessionTransport> Foyer<T> {
     /// Consume a real public passkey assertion and retain the server session.
     /// Only the authenticated identity, role and deadline may reach the shell.
     pub async fn authenticate(&mut self, request: Value) -> Result<SessionInfo> {
+        self.authenticate_pinned(request, None).await
+    }
+
+    pub(crate) async fn authenticate_pinned(
+        &mut self,
+        request: Value,
+        original_id: Option<Vec<u8>>,
+    ) -> Result<SessionInfo> {
         let mut retained = self.shared.session.lock().await;
         // Invalidate earlier stamps before the mutation can be sent. Identical
         // public SessionInfo values do not identify the same server session.
         retained.info = None;
+        retained.login_credential = None;
         retained.authentication = retained
             .authentication
             .checked_add(1)
             .ok_or(Error::Unavailable)?;
         let info = retained.client.authenticate(request).await?;
         retained.info = Some(info.clone());
+        retained.login_credential = original_id;
         Ok(info)
     }
 }

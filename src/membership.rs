@@ -1,11 +1,13 @@
 //! Narrow live reads over the original Foyer session. No trust or bearer copies.
 use crate::{Error, Foyer, Result, SessionInfo, Transport};
 use futures::{
-    future::{AbortHandle, Abortable},
+    future::{AbortHandle, AbortRegistration, Abortable},
     lock::{Mutex, OwnedMutexGuard},
 };
 mod certificate;
+mod global;
 pub use certificate::{CertifiedMembershipLease, RegisteredCertificateLease};
+pub use global::{GlobalWalletLease, LiveGlobalWallet};
 
 use std::{
     cell::RefCell,
@@ -16,6 +18,7 @@ pub(crate) struct Retained<T> {
     pub(crate) client: cvld::client::Client<T>,
     pub(crate) info: Option<SessionInfo>,
     pub(crate) authentication: u64,
+    pub(crate) login_credential: Option<Vec<u8>>,
 }
 #[derive(Default)]
 struct Lifetime {
@@ -28,6 +31,29 @@ pub(crate) struct Shared<T> {
     lifetime: RefCell<Lifetime>,
 }
 impl<T> Shared<T> {
+    pub(crate) fn begin_pending(self: &Rc<Self>) -> Result<(Pending<T>, AbortRegistration)> {
+        let (abort, registration) = AbortHandle::new_pair();
+        let generation = {
+            let mut lifetime = self.lifetime.borrow_mut();
+            if lifetime.closed || lifetime.pending.is_some() {
+                return Err(Error::Unavailable);
+            }
+            lifetime.generation = lifetime
+                .generation
+                .checked_add(1)
+                .ok_or(Error::Unavailable)?;
+            lifetime.pending = Some(abort);
+            lifetime.generation
+        };
+        Ok((
+            Pending {
+                shared: Rc::downgrade(self),
+                generation,
+            },
+            registration,
+        ))
+    }
+
     pub(crate) fn is_closed(&self) -> bool {
         self.lifetime.try_borrow().map_or(true, |life| life.closed)
     }
@@ -49,6 +75,7 @@ impl<T: Transport> Shared<T> {
                 client: cvld::client::Client::new(transport),
                 info: None,
                 authentication: 0,
+                login_credential: None,
             })),
             lifetime: RefCell::default(),
         }
@@ -151,7 +178,7 @@ impl<T> Foyer<T> {
     }
 }
 
-struct Pending<T> {
+pub(crate) struct Pending<T> {
     shared: Weak<Shared<T>>,
     generation: u64,
 }
@@ -186,23 +213,7 @@ impl<T: Transport> LiveMembership<T> {
         mut clock: impl FnMut() -> u64,
     ) -> Result<MembershipLease<T>> {
         let shared = self.0.upgrade().ok_or(Error::Unavailable)?;
-        let (abort, registration) = AbortHandle::new_pair();
-        let generation = {
-            let mut lifetime = shared.lifetime.borrow_mut();
-            if lifetime.closed || lifetime.pending.is_some() {
-                return Err(Error::Unavailable);
-            }
-            lifetime.generation = lifetime
-                .generation
-                .checked_add(1)
-                .ok_or(Error::Unavailable)?;
-            lifetime.pending = Some(abort);
-            lifetime.generation
-        };
-        let pending = Pending {
-            shared: self.0.clone(),
-            generation,
-        };
+        let (pending, registration) = shared.begin_pending()?;
         let started = clock();
         let observed = Abortable::new(
             async {

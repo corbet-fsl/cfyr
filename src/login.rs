@@ -34,9 +34,13 @@ impl<T: SessionTransport> Foyer<T> {
         ceremony: String,
         credential: cpky::PublicCredential,
     ) -> Result<SessionInfo> {
-        self.authenticate(serde_json::json!({
-            "ceremony": ceremony, "credential": credential.into_json(),
-        }))
+        let original_id = credential.credential_id().map_err(|_| Error::Invalid)?;
+        self.authenticate_pinned(
+            serde_json::json!({
+                "ceremony": ceremony, "credential": credential.into_json(),
+            }),
+            Some(original_id),
+        )
         .await
     }
 }
