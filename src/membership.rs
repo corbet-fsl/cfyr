@@ -4,6 +4,9 @@ use futures::{
     future::{AbortHandle, Abortable},
     lock::{Mutex, OwnedMutexGuard},
 };
+mod certificate;
+pub use certificate::{CertifiedMembershipLease, RegisteredCertificateLease};
+
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},

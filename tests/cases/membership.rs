@@ -1,7 +1,7 @@
 //! Original HTTPS client, server, passport, enrolment and passkey session. No
 //! substitute roster/authority supplies the successful observations.
 use super::*;
-#[path = "../owner/mod.rs"]
+#[path = "../support/owner.rs"]
 mod owner;
 use owner::*;
 use serde_json::json;

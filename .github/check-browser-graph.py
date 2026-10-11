@@ -12,7 +12,7 @@ if len(facades) != 1 or len(owners) != 1:
 facade, owner = facades[0], owners[0]
 if facade['source'] is not None or Path(facade['manifest_path']).resolve() != Path('Cargo.toml').resolve():
     raise SystemExit('Browser test must execute this local Foyer source')
-if not re.fullmatch(r'git\+https://github\.com/corbet-libs/cvld\?branch=main#[0-9a-f]{40}', owner['source'] or ''):
+if not re.fullmatch(r'git\+https://git\.corbet\.ch/corbet-libs/cvld\?branch=main#[0-9a-f]{40}', owner['source'] or ''):
     raise SystemExit('Browser test must use the original door main graph')
 nodes = {node['id']: set(node['features']) for node in metadata['resolve']['nodes']}
 if 'browser' not in nodes[facade['id']] or 'http' in nodes[facade['id']]:
@@ -24,8 +24,8 @@ print('Browser consumer executes this Foyer and the original portable door')
 
 for name, feature in [('cnvy', 'browser')]:
     packages = [p for p in metadata['packages'] if p['name'] == name]
-    if len(packages) != 1 or not re.fullmatch(r'git\+https://github\.com/corbet-foss/' + name + r'\?branch=main#[0-9a-f]{40}', packages[0]['source'] or ''):
-        raise SystemExit('Browser trust must use exactly one original owner main')
+    if len(packages) != 1 or not re.fullmatch(r'git\+https://git\.corbet\.ch/corbet-foss/' + name + r'\.git\?branch=v01#[0-9a-f]{40}', packages[0]['source'] or ''):
+        raise SystemExit('Browser trust must use exactly one original owner source')
     enabled = nodes[packages[0]['id']]
     if feature not in enabled or 'http' in enabled:
         raise SystemExit('Expected the original browser trust transport only')

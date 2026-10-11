@@ -1,7 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 #[path = "cases/member.rs"]
 mod member;
-#[path = "owner/mod.rs"]
+#[path = "support/owner.rs"]
 mod support;
 
 use cfyr::{Error, Foyer, HttpClient, action};

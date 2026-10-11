@@ -22,6 +22,27 @@ impl<T> Foyer<T> {
 }
 
 impl<T> CurrentPolicy<T> {
+    pub(crate) fn belongs_to(&self, owner: &Weak<Shared<T>>) -> bool {
+        self.session.ptr_eq(owner)
+    }
+
+    pub(crate) fn check_origin(&self, owner: &Weak<Shared<T>>, origin: &str) -> crate::Result<()> {
+        if !self.belongs_to(owner) {
+            return Err(crate::Error::Unauthorized);
+        }
+        let session = self.session.upgrade().ok_or(crate::Error::Unavailable)?;
+        if session.is_closed() {
+            return Err(crate::Error::Unavailable);
+        }
+        let retained = self.trust.upgrade().ok_or(crate::Error::Unavailable)?;
+        let trust = retained.try_lock().ok_or(crate::Error::Unavailable)?;
+        let trust = trust.as_ref().ok_or(crate::Error::Unavailable)?;
+        if trust.origin() != origin || session.is_closed() {
+            return Err(crate::Error::Unauthorized);
+        }
+        Ok(())
+    }
+
     /// Reborrow and revalidate original current policy at the supplied trusted
     /// Unix-second time. Call after every authority await and before returning
     /// authorization; this port performs no caching or independent verification.

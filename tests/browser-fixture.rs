@@ -1,5 +1,5 @@
 //! Real native door behind the ephemeral browser-test TLS endpoint.
-#[path = "owner/mod.rs"]
+#[path = "support/owner.rs"]
 mod support;
 use axum::{
     Json, Router,

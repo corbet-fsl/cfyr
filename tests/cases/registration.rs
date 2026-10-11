@@ -1,7 +1,7 @@
 //! Original member registration correlated with its first login, through the
 //! real owner server and the maintained software authenticator.
 use super::*;
-#[path = "../owner/mod.rs"]
+#[path = "../support/owner.rs"]
 mod owner;
 use cpky::Context;
 use cpky::software::{SoftwareAuthenticator, TestConfiguration};

@@ -23,6 +23,10 @@ pub struct Trust {
 }
 
 impl Trust {
+    pub(crate) fn origin(&self) -> &str {
+        self.charter.origin()
+    }
+
     /// Configure the native original Envoy HTTPS port and Charter from the same
     /// trust anchor. Explicit operator roots supplement normal TLS validation.
     #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
