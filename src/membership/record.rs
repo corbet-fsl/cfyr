@@ -52,20 +52,13 @@ impl<T> CommonRecordLease<'_, T> {
             return Err(Error::Unauthorized);
         }
         self.available = false;
-        let checked = self.lease.check(clock)?;
-        if self.lease.held.login_credential.as_ref() != Some(&self.credential) {
-            return Err(Error::Unauthorized);
-        }
-        self.policy.check_origin(&self.lease.owner, &self.origin)?;
-        self.policy
-            .with_current(checked, |current| {
-                if current.community() == "wallet" {
-                    Err(Error::Unauthorized)
-                } else {
-                    Ok(())
-                }
-            })
-            .map_err(|_| Error::Unauthorized)??;
+        let checked = current::check_community(
+            &mut self.lease,
+            self.policy,
+            &self.origin,
+            &self.credential,
+            clock,
+        )?;
         self.available = true;
         Ok(checked)
     }
@@ -89,23 +82,20 @@ impl<T> CommonRecordLease<'_, T> {
         mut clock: impl FnMut() -> u64,
         inspect: impl FnOnce(&cnvy::cchr::VerifiedCharter, &Observation, &[u8], &str, u64) -> R,
     ) -> Result<(R, u64)> {
-        let checked = self.check(&mut clock)?;
+        if !self.available {
+            return Err(Error::Unauthorized);
+        }
         self.available = false;
-        let output = self
-            .policy
-            .with_current(checked, |current| {
-                inspect(
-                    current,
-                    &self.lease.observation,
-                    &self.credential,
-                    &self.origin,
-                    checked,
-                )
-            })
-            .map_err(|_| Error::Unauthorized)?;
+        let output = current::with_checked_community(
+            &mut self.lease,
+            self.policy,
+            &self.origin,
+            &self.credential,
+            &mut clock,
+            inspect,
+        )?;
         self.available = true;
-        let completed = self.check(&mut clock)?;
-        Ok((output, completed))
+        Ok(output)
     }
 }
 
