@@ -10,7 +10,7 @@ pub use accounting::{AccountChallenge, AccountGrantLease};
 mod global;
 mod global_initial;
 pub use certificate::{CertifiedMembershipLease, InitialCreationLease, RegisteredCertificateLease};
-pub use global::{GlobalWalletLease, LiveGlobalWallet};
+pub use global::{GlobalPassportIssuance, GlobalWalletLease, LiveGlobalWallet};
 pub use global_initial::GlobalInitialCreationLease;
 
 use std::{

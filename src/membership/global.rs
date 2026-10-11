@@ -1,6 +1,8 @@
 //! Global wallet session observation; no community or Keys authority.
 use super::*;
 use cvld::client::AuthenticatedTransport;
+mod passport;
+pub use passport::GlobalPassportIssuance;
 
 /// Weak read port for the trusted runtime's global-wallet HTTPS origin. Public
 /// request JSON cannot select this origin or supply an authenticated account.

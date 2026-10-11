@@ -416,7 +416,8 @@ impl TlsIngress {
                                 | "/v1/initial_publication_bind" | "/v1/global_self_ban_begin"
                                 | "/v1/global_self_ban_finish" | "/v1/wallet_trust_feed"
                                 | "/v1/wallet_trust_changes" | "/v1/wallet_device_keys"
-                                | "/v1/wallet_device_authorize" | "/v1/passkey_certificate"));
+                                | "/v1/wallet_device_authorize" | "/v1/passkey_certificate"
+                                | "/v1/development_gate" | "/v1/passport_challenge" | "/v1/passport_issue"));
                             // Fixed, test-owned virtual-host ingress route. It never
                             // takes the upstream URL or Host from request JSON.
                             // The WebAuthn vault realm stays the original VAULT;
@@ -445,6 +446,8 @@ impl TlsIngress {
                                 "/v1/initial_publication_bind" => 3,
                                 "/v1/wallet_device_keys" => 4,
                                 "/v1/passkey_certificate" => 5,
+                                "/v1/passport_challenge" => 6,
+                                "/v1/passport_issue" => 7,
                                 _ => 0,
                             };
                             if target != 0 && delayed.target.load(Ordering::SeqCst) == target
@@ -479,3 +482,6 @@ mod enrollment;
 #[cfg(feature = "http")]
 #[path = "wallet_certificate.rs"]
 mod certificates;
+
+#[path = "global_passport.rs"]
+mod passport;
