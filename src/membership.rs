@@ -5,6 +5,8 @@ use futures::{
     lock::{Mutex, OwnedMutexGuard},
 };
 mod accounting;
+mod record;
+pub use record::CommonRecordLease;
 mod certificate;
 pub use accounting::{AccountChallenge, AccountGrantLease};
 mod global;
