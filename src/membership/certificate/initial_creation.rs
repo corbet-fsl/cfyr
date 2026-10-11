@@ -90,6 +90,16 @@ fn projection(response: &serde_json::Value) -> Result<([u8; 32], Option<[u8; 32]
 }
 
 impl<T> InitialCreationLease<'_, T> {
+    /// Refuse a transport owner that would re-lock this held Foyer session.
+    /// This compares only genuine local owner identities and close lifetimes;
+    /// both sessions still require their own fresh membership/device checks.
+    pub fn require_independent_owner(&self, other: &CurrentPolicy<T>) -> Result<()> {
+        self.checked_at.ok_or(Error::Unauthorized)?;
+        self.certified.checked.as_ref().ok_or(Error::Unauthorized)?;
+        self.certified.lease.checked_at.ok_or(Error::Unauthorized)?;
+        other.require_independent_owner(&self.certified.lease.owner)
+    }
+
     /// Authentic original server commitment, not a root or accepted local state.
     pub fn seed(&self) -> Result<[u8; 32]> {
         self.checked_at.ok_or(Error::Unauthorized)?;

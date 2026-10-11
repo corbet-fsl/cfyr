@@ -262,6 +262,60 @@ async fn companion(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn held_initial_requires_an_independent_actual_transport_foyer() {
+    let (api, tls, service, mut keys, _) = enrolled().await;
+    let other = companion(&tls, &service, &mut keys).await;
+    let same_owner = api.current_policy();
+    let other_owner = other.current_policy();
+    let mut policy = api.current_policy();
+    let mut initial = api
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap()
+        .passkey_certificate(&mut policy, || NOW)
+        .await
+        .unwrap()
+        .initial_creation(|| NOW)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        assert!(initial.require_independent_owner(&same_owner).is_err());
+        initial.require_independent_owner(&other_owner).unwrap();
+        // The independently logged-in same-key owner still performs its actual
+        // HTTPS membership/device reads while the first session guard is held.
+        let observed = other.live_membership().observe(|| NOW).await.unwrap();
+        assert_eq!(observed.member, initial.observation().unwrap().member);
+    })
+    .await
+    .unwrap();
+    other.shared.close();
+    assert!(initial.require_independent_owner(&other_owner).is_err());
+    assert!(initial.check(|| NOW - 1).is_err());
+    assert!(initial.require_independent_owner(&same_owner).is_err());
+
+    drop(initial);
+    let disposed = {
+        let owner = companion(&tls, &service, &mut keys).await;
+        owner.current_policy()
+    };
+    let initial = api
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap()
+        .passkey_certificate(&mut policy, || NOW)
+        .await
+        .unwrap()
+        .initial_creation(|| NOW)
+        .await
+        .unwrap();
+    assert!(initial.require_independent_owner(&disposed).is_err());
+    api.shared.close();
+    assert!(initial.require_independent_owner(&same_owner).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn held_refresh_observes_actual_new_device_without_renewing_identity_or_deadline() {
     let (api, tls, service, mut keys, raw_id) = enrolled().await;
     let mut other = companion(&tls, &service, &mut keys).await;

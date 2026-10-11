@@ -22,6 +22,18 @@ impl<T> Foyer<T> {
 }
 
 impl<T> CurrentPolicy<T> {
+    pub(crate) fn require_independent_owner(&self, owner: &Weak<Shared<T>>) -> crate::Result<()> {
+        let original = owner.upgrade().ok_or(crate::Error::Unavailable)?;
+        let other = self.session.upgrade().ok_or(crate::Error::Unavailable)?;
+        if original.is_closed() || other.is_closed() || self.trust.upgrade().is_none() {
+            return Err(crate::Error::Unavailable);
+        }
+        if self.session.ptr_eq(owner) {
+            return Err(crate::Error::Unauthorized);
+        }
+        Ok(())
+    }
+
     pub(crate) fn belongs_to(&self, owner: &Weak<Shared<T>>) -> bool {
         self.session.ptr_eq(owner)
     }
