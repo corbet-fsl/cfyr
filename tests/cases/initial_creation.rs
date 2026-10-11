@@ -199,3 +199,45 @@ async fn ordinary_registration_cannot_acquire_initial_candidate_provenance() {
         .unwrap();
     assert!(original.initial_creation(|| NOW).await.is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn original_policy_contention_and_callback_unwind_consume_initial_lease() {
+    let (mut api, _tls, _service, _keys, _) = enrolled().await;
+    let mut policy = api.current_policy();
+    let mut initial = api
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap()
+        .passkey_certificate(&mut policy, || NOW)
+        .await
+        .unwrap()
+        .initial_creation(|| NOW)
+        .await
+        .unwrap();
+    assert_eq!(initial.with_current(|| NOW, |_| 7).unwrap(), 7);
+    let held = api.trust().unwrap();
+    assert!(initial.with_current(|| NOW, |_| ()).is_err());
+    drop(held);
+    assert!(initial.check(|| NOW).is_err());
+    drop(initial);
+    let mut initial = api
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap()
+        .passkey_certificate(&mut policy, || NOW)
+        .await
+        .unwrap()
+        .initial_creation(|| NOW)
+        .await
+        .unwrap();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = initial.with_current(|| NOW, |_| panic!("consumer callback"));
+        }))
+        .is_err()
+    );
+    assert!(initial.check(|| NOW).is_err());
+    assert!(initial.seed().is_err());
+}

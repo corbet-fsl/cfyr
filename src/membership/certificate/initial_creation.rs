@@ -135,6 +135,26 @@ impl<T> InitialCreationLease<'_, T> {
         self.checked_at = Some(now);
         Ok(now)
     }
+
+    /// Borrow this same current original Charter only inside a synchronous
+    /// composition check. The lease rechecks its live owner before and after the
+    /// callback; the callback cannot turn stored public evidence into authority.
+    pub fn with_current<R>(
+        &mut self,
+        mut clock: impl FnMut() -> u64,
+        inspect: impl FnOnce(&cnvy::cchr::VerifiedCharter) -> R,
+    ) -> Result<R> {
+        let now = self.check(&mut clock)?;
+        self.checked_at = None;
+        let result = self
+            .certified
+            .policy
+            .with_current(now, inspect)
+            .map_err(|_| Error::Unauthorized)?;
+        self.checked_at = Some(now);
+        self.check(&mut clock)?;
+        Ok(result)
+    }
 }
 
 impl<T: AuthenticatedTransport> InitialCreationLease<'_, T> {
