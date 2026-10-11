@@ -125,6 +125,13 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
 }
 
 impl<T: AuthenticatedTransport> GlobalPassportIssuance<T> {
+    /// Exact HTTPS endpoint of the original retained authenticated transport.
+    /// This is checked routing data, never a caller-selected issuer authority.
+    pub fn origin(&mut self, mut clock: impl FnMut() -> u64) -> Result<&str> {
+        self.lease.check(&mut clock)?;
+        Ok(&self.lease.origin)
+    }
+
     /// Original public account/key/issuer/challenge data, checked against the
     /// same retained session. This is not an issuer signature or Wallet grant.
     pub fn with_current<R>(
