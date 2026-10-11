@@ -5,7 +5,11 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::rc::{Rc, Weak};
 
+mod global;
 mod initial;
+pub use global::{
+    GlobalFinishContinuation, GlobalRegistrationReservation, PendingGlobalInitialRegistration,
+};
 pub use initial::{FinishContinuation, PendingInitialRegistration};
 
 #[derive(Deserialize)]

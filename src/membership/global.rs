@@ -126,6 +126,68 @@ impl<T: AuthenticatedTransport> LiveGlobalWallet<T> {
 }
 
 impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
+    pub(super) async fn bind_initial(
+        &mut self,
+        seed: [u8; 32],
+        publication: [u8; 32],
+        clock: &mut impl FnMut() -> u64,
+    ) -> Result<()> {
+        let started = self.check(&mut *clock)?;
+        self.checked_at = None;
+        let shared = self.owner.upgrade().ok_or(Error::Unavailable)?;
+        let (abort, registration) = AbortHandle::new_pair();
+        {
+            let mut lifetime = shared.lifetime.borrow_mut();
+            if lifetime.closed
+                || lifetime.generation != self._pending.generation
+                || lifetime.pending.is_none()
+            {
+                return Err(Error::Unavailable);
+            }
+            lifetime.pending = Some(abort);
+        }
+        let completed = Abortable::new(
+            async {
+                self.held
+                    .client
+                    .forward("global_public", serde_json::json!({}))
+                    .await?;
+                let observed = clock();
+                if shared.is_closed() || observed < started || observed >= self.expires {
+                    return Err(Error::Unauthorized);
+                }
+                let response = self
+                    .held
+                    .client
+                    .forward(
+                        "initial_publication_bind",
+                        serde_json::json!({"seed":seed,"publication":publication}),
+                    )
+                    .await
+                    .map_err(|_| Error::Reconcile)?;
+                let completed = clock();
+                let actual: super::global_initial::InitialResponse =
+                    serde_json::from_value(response).map_err(|_| Error::Reconcile)?;
+                if actual.seed != seed
+                    || actual.publication != Some(publication)
+                    || actual.checked_at < started
+                    || completed < observed.max(actual.checked_at)
+                    || completed >= self.expires
+                    || shared.is_closed()
+                {
+                    return Err(Error::Reconcile);
+                }
+                Ok(completed)
+            },
+            registration,
+        )
+        .await
+        .map_err(|_| Error::Reconcile)??;
+        self.checked_at = Some(completed);
+        self.check(&mut *clock).map_err(|_| Error::Reconcile)?;
+        Ok(())
+    }
+
     /// Exact original global account ID. It is public session metadata, never
     /// community membership, a pseudonym, a certificate or a custody verdict.
     pub fn user(&self) -> Result<&str> {

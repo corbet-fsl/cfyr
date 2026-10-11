@@ -29,6 +29,7 @@ const VAULT: &str = "https://vault.wallet.example.test";
 #[derive(Default)]
 struct Gate {
     enabled: AtomicBool,
+    target: AtomicUsize,
     arrived: Notify,
     release: Notify,
 }
@@ -332,6 +333,7 @@ struct TlsIngress {
     root: Vec<u8>,
     observations: Arc<AtomicUsize>,
     gate: Arc<Gate>,
+    mutation: Arc<Gate>,
     task: tokio::task::JoinHandle<()>,
 }
 impl Drop for TlsIngress {
@@ -366,6 +368,8 @@ impl TlsIngress {
         let observed = observations.clone();
         let gate = Arc::new(Gate::default());
         let paused = gate.clone();
+        let mutation = Arc::new(Gate::default());
+        let delayed = mutation.clone();
         let task = tokio::spawn(async move {
             let acceptor = TlsAcceptor::from(Arc::new(config));
             let mut active = tokio::task::JoinSet::new();
@@ -377,6 +381,7 @@ impl TlsIngress {
                         let upstream = upstream.clone();
                         let observed = observed.clone();
                         let paused = paused.clone();
+                        let delayed = delayed.clone();
                         active.spawn(async move {
                             let Ok(mut tls) = acceptor.accept(io).await else { return; };
                             let mut bytes = Vec::new();
@@ -405,7 +410,10 @@ impl TlsIngress {
                             assert!(matches!(path.as_str(), "/v1/register_begin" | "/v1/register_finish"
                                 | "/v1/login_discoverable_begin" | "/v1/login_finish" | "/v1/logout"
                                 | "/v1/global_public" | "/v1/passkey_list"
-                                | "/v1/passkey_add" | "/v1/passkey_revoke"));
+                                | "/v1/passkey_add" | "/v1/passkey_revoke"
+                                | "/v1/global_initial_registration_continue" | "/v1/initial_creation"
+                                | "/v1/initial_publication_bind" | "/v1/global_self_ban_begin"
+                                | "/v1/global_self_ban_finish"));
                             // Fixed, test-owned virtual-host ingress route. It never
                             // takes the upstream URL or Host from request JSON.
                             // The WebAuthn vault realm stays the original VAULT;
@@ -428,6 +436,17 @@ impl TlsIngress {
                                     paused.release.notified().await;
                                 }
                             }
+                            let target = match path.as_str() {
+                                "/v1/global_initial_registration_continue" => 1,
+                                "/v1/register_finish" => 2,
+                                "/v1/initial_publication_bind" => 3,
+                                _ => 0,
+                            };
+                            if target != 0 && delayed.target.load(Ordering::SeqCst) == target
+                                && delayed.enabled.swap(false, Ordering::SeqCst) {
+                                delayed.arrived.notify_one();
+                                delayed.release.notified().await;
+                            }
                             let head = format!("HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
                             if tls.write_all(head.as_bytes()).await.is_ok() && tls.write_all(&body).await.is_ok() {
                                 let _ = tls.shutdown().await;
@@ -443,7 +462,11 @@ impl TlsIngress {
             root: root.to_vec(),
             observations,
             gate,
+            mutation,
             task,
         }
     }
 }
+
+#[path = "global_enrollment.rs"]
+mod enrollment;

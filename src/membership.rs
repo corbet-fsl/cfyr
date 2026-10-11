@@ -6,8 +6,10 @@ use futures::{
 };
 mod certificate;
 mod global;
+mod global_initial;
 pub use certificate::{CertifiedMembershipLease, InitialCreationLease, RegisteredCertificateLease};
 pub use global::{GlobalWalletLease, LiveGlobalWallet};
+pub use global_initial::GlobalInitialCreationLease;
 
 use std::{
     cell::RefCell,
