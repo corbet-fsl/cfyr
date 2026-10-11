@@ -26,8 +26,9 @@ ln -s "$state/moon-cache/hashes" .moon/cache/hashes
 ln -s "$state/moon-cache/outputs" .moon/cache/outputs
 # Tool installation is an explicit part of this job, in persistent CI storage.
 tool_source=github:NixOS/nixpkgs/b7c2ada94fe99c15b0dbcf4d11fd7850b957a436
-tool_paths=$(nix build --no-link --print-out-paths "$tool_source#moon" "$tool_source#proto" "$tool_source#cargo-llvm-cov" "$tool_source#cargo-deny" "$tool_source#llvmPackages.clang-unwrapped")
+tool_paths=$(nix build --no-link --print-out-paths "$tool_source#moon" "$tool_source#proto" "$tool_source#cargo-llvm-cov" "$tool_source#cargo-deny" "$tool_source#llvmPackages.clang-unwrapped" "$tool_source#pkg-config" "$tool_source#openssl.dev")
 for path in $tool_paths; do PATH="$path/bin:$PATH"; done
+for path in $tool_paths; do [ -d "$path/lib/pkgconfig" ] && PKG_CONFIG_PATH="$path/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"; done; export PKG_CONFIG_PATH
 export PROTO_HOME="$toolchains/proto" RUSTUP_HOME="$toolchains/rustup"
 shared_cargo_home=${CARGO_HOME:-}
 export CARGO_HOME="$toolchains/cargo" MOON_HOME="$state/moon-home"
