@@ -5,6 +5,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::rc::{Rc, Weak};
 
+mod initial;
+pub use initial::{FinishContinuation, PendingInitialRegistration};
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Challenge {

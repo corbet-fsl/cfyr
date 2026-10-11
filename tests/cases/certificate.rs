@@ -30,6 +30,7 @@ const VAULT: &str = "https://vault.alpha.example.test";
 #[derive(Default)]
 struct Gate {
     enabled: AtomicBool,
+    action: AtomicUsize,
     arrived: Notify,
     release: Notify,
 }
@@ -108,7 +109,9 @@ impl TlsIngress {
                                 | "/v1/login_discoverable_begin" | "/v1/login_finish" | "/v1/logout"
                                 | "/v1/lobby" | "/v1/device_keys" | "/v1/device_authorize"
                                 | "/v1/trust_feed" | "/v1/trust_changes" | "/v1/passkey_certificate"
-                                | "/v1/passkey_add" | "/v1/passkey_revoke"));
+                                | "/v1/passkey_add" | "/v1/passkey_revoke"
+                                | "/v1/initial_registration_begin" | "/v1/initial_creation"
+                                | "/v1/initial_publication_bind"));
                             // Fixed, test-owned virtual-host ingress route. It never
                             // takes the upstream URL or Host from request JSON.
                             // The WebAuthn vault realm stays the original VAULT;
@@ -126,10 +129,15 @@ impl TlsIngress {
                             // server checked_at. Only reply timing can be gated.
                             if path == "/v1/passkey_certificate" {
                                 observed.fetch_add(1, Ordering::SeqCst);
-                                if paused.enabled.swap(false, Ordering::SeqCst) {
-                                    paused.arrived.notify_one();
-                                    paused.release.notified().await;
-                                }
+                            }
+                            let selected = match paused.action.load(Ordering::SeqCst) {
+                                1 => "/v1/initial_registration_begin",
+                                2 => "/v1/register_finish",
+                                _ => "/v1/passkey_certificate",
+                            };
+                            if path == selected && paused.enabled.swap(false, Ordering::SeqCst) {
+                                paused.arrived.notify_one();
+                                paused.release.notified().await;
                             }
                             let head = format!("HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
                             if tls.write_all(head.as_bytes()).await.is_ok() && tls.write_all(&body).await.is_ok() {
@@ -567,3 +575,6 @@ async fn actual_passkey_revocation_feed_is_reborrowed_after_certificate_wait() {
     f.tls.gate.release.notify_one();
     assert!(matches!(pending.await, Err(Error::Unauthorized)));
 }
+
+#[path = "initial_registration.rs"]
+mod initial_registration;

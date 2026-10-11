@@ -48,3 +48,15 @@ installs the bearer in the same pinned transport and returns only
 and absent visibility metadata fails closed. This does not admit a member or
 replace Journey's lobby. Raw JSON duplicate keys must be rejected before the
 embedding converts its input to Value.
+Initial community registration can retain a bounded public finish continuation
+for the encrypted Store before submitting `register_finish`. The live preparation
+checks this Foyer's exact HTTPS origin, current Charter, authentication generation
+and exclusive ceremony deadline. CPky supplies the sanitized public credential;
+the original server verifies its exact WebAuthn challenge when finish is submitted.
+
+Restored continuation bytes are request data. They cannot construct an accepted
+registration or session, and replay returns only `()`. A lost finish reply requires
+fresh same-key authentication and original enrollment-seed/current-certificate
+checks; a later refusal does not prove the earlier insertion was absent. These
+methods grant no Keys, Create, Use or recovery authority. The added TLS owner tests
+are authored; native and browser execution remains unqualified.
