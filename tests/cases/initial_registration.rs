@@ -5,6 +5,9 @@ use crate::registration::{FinishContinuation, PendingInitialRegistration};
 const SEED: [u8; 32] = [81; 32];
 const HEADER: &[u8] = b"cfyr.initial-finish.v1\0";
 
+#[path = "initial_creation.rs"]
+mod initial_creation;
+
 struct InitialFixture {
     tls: TlsIngress,
     service: Running,

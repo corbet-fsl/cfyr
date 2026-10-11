@@ -3,6 +3,9 @@ use super::*;
 use crate::{policy::CurrentPolicy, registration::RegisteredSession};
 use cvld::client::AuthenticatedTransport;
 
+mod initial_creation;
+pub use initial_creation::InitialCreationLease;
+
 struct CheckedCertificate {
     credential: Vec<u8>,
     server_checked_at: u64,

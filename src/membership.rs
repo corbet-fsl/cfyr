@@ -6,7 +6,7 @@ use futures::{
 };
 mod certificate;
 mod global;
-pub use certificate::{CertifiedMembershipLease, RegisteredCertificateLease};
+pub use certificate::{CertifiedMembershipLease, InitialCreationLease, RegisteredCertificateLease};
 pub use global::{GlobalWalletLease, LiveGlobalWallet};
 
 use std::{

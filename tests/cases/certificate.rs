@@ -133,6 +133,8 @@ impl TlsIngress {
                             let selected = match paused.action.load(Ordering::SeqCst) {
                                 1 => "/v1/initial_registration_begin",
                                 2 => "/v1/register_finish",
+                                3 => "/v1/initial_creation",
+                                4 => "/v1/initial_publication_bind",
                                 _ => "/v1/passkey_certificate",
                             };
                             if path == selected && paused.enabled.swap(false, Ordering::SeqCst) {
