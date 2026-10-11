@@ -24,7 +24,8 @@ use tokio_rustls::{
 
 const HOST: &str = WALLET;
 const COMMUNITY: &str = "api.alpha.example.test";
-const VAULT: &str = "https://vault.wallet.example.test";
+// Exact original global Passkeys RP origin; the wallet has its own realm.
+const VAULT: &str = "https://wallet.example.test";
 
 #[derive(Default)]
 struct Gate {
