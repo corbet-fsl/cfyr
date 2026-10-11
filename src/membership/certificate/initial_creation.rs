@@ -100,6 +100,14 @@ impl<T> InitialCreationLease<'_, T> {
         other.require_independent_owner(&self.certified.lease.owner)
     }
 
+    /// Original authenticated HTTPS origin retained by this exact certificate
+    /// owner. Public routing data only; this grants no signing permission.
+    pub fn origin(&self) -> Result<&str> {
+        self.checked_at.ok_or(Error::Unauthorized)?;
+        self.certified.checked.as_ref().ok_or(Error::Unauthorized)?;
+        Ok(&self.certified.origin)
+    }
+
     /// Authentic original server commitment, not a root or accepted local state.
     pub fn seed(&self) -> Result<[u8; 32]> {
         self.checked_at.ok_or(Error::Unauthorized)?;
