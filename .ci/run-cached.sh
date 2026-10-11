@@ -5,10 +5,16 @@ set -euo pipefail
 : "${CI_COMMIT_SHA:?Missing verified source revision}"
 : "${CI_REPOSITORY_URL:?Missing canonical repository identity}"
 : "${CHECKS:?Missing declared check selection}"
+if [ "$CHECKS" != "rust" ] && [ "$CHECKS" != "resolve-dependencies" ]; then
+  echo "CHECKS must be rust or resolve-dependencies, got: $CHECKS" >&2
+  exit 2
+fi
 cache_root=${CI_CACHE_ROOT:-${CARGO_HOME:-}}
 [[ $cache_root = /* ]] || { echo 'An absolute persistent CI_CACHE_ROOT or CARGO_HOME is required' >&2; exit 2; }
 namespace=$(printf '%s' "$CI_REPOSITORY_URL" | sha256sum | cut -c1-24)
 state="$cache_root/ccid-cached/$namespace"
+export ARTIFACT_ROOT="$state/release-artifacts"
+mkdir -p "$ARTIFACT_ROOT"
 toolchains=${CI_TOOLCHAIN_ROOT:-$cache_root/ccid-cached/toolchains}
 [[ $toolchains = /* ]] || { echo 'CI_TOOLCHAIN_ROOT must be absolute' >&2; exit 2; }
 mkdir -p "$state" "$toolchains"
@@ -56,6 +62,9 @@ test -f Cargo.lock || { echo 'Missing committed Cargo.lock' >&2; exit 2; }
 # Ensure the Wasm target required by the gates is present (idempotent).
 if ! "$CARGO_HOME/bin/rustup" target list --toolchain stable --installed 2>/dev/null | grep -qx 'wasm32-unknown-unknown'; then
   "$CARGO_HOME/bin/rustup" target add wasm32-unknown-unknown --toolchain stable
+fi
+if [ "$CHECKS" = "resolve-dependencies" ]; then
+  exec "$CCID_BIN" check --repo "$PWD" --check "$CHECKS"
 fi
 "$CCID_BIN" cached --repo "$PWD" --check "$CHECKS"
 IFS=, read -r -a selected_checks <<< "$CHECKS"

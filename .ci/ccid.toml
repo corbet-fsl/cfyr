@@ -6,12 +6,20 @@ repository = "https://git.corbet.ch/corbet-libs/cfyr.git"
 kind = "commands"
 commands = [
   ["rustc", "--version"],
+  ["bash", ".ci/import-owner-tests.sh"],
   ["cargo", "fmt", "--all", "--check"],
   ["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"],
   ["cargo", "test", "--locked"],
   ["cargo", "check", "--locked", "--target", "wasm32-unknown-unknown"],
 ]
-cache_tools = [["rustc", "-vV"], ["cargo", "--version"]]
+cache_tools = [["rustc", "-vV"], ["cargo", "--version"], ["python3", "--version"]]
+cache_outputs = ["dependency-metadata.json", "owner-fixture.json"]
+
+[checks.resolve-dependencies]
+kind = "commands"
+commands = [["bash", ".ci/resolve-dependencies.sh"]]
+# The pinned renderer predates cache=false; the runner uses direct uncached check.
+cache_outputs = ["Cargo.lock", "tests/browser/Cargo.lock"]
 
 [render]
 tool_revision = "53c129c2efa3b9279d2ecbc237d15acdfb656d8c"
@@ -28,3 +36,10 @@ branch = "v01"
 consumer_branch = "v01"
 job = "v01-push"
 self_name = "cfyr"
+
+# Retain the reviewed integration graph before a separate locked verification.
+[jobs.resolve-dependencies]
+scheduler = "crow"
+checks = ["resolve-dependencies"]
+workflow = "repository-jobs"
+command = ["bash", ".ci/run-cached.sh"]
