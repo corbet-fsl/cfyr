@@ -15,6 +15,20 @@ commands = [
 cache_tools = [["rustc", "-vV"], ["cargo", "--version"], ["python3", "--version"]]
 cache_outputs = ["dependency-metadata.json", "owner-fixture.json"]
 
+# Direct product qualification with the same genuine resolved owner fixture.
+# Full cached Rust/Wasm verification remains a separate unchanged gate.
+[checks.native]
+kind = "commands"
+commands = [
+  ["rustc", "--version"],
+  ["bash", ".ci/import-owner-tests.sh"],
+  ["cargo", "fmt", "--all", "--check"],
+  ["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"],
+  ["cargo", "test", "--locked", "--lib"],
+]
+cache_tools = [["rustc", "-vV"], ["cargo", "--version"], ["python3", "--version"]]
+cache_outputs = ["dependency-metadata.json", "owner-fixture.json"]
+
 [checks.resolve-dependencies]
 kind = "commands"
 commands = [["bash", ".ci/resolve-dependencies.sh"]]
@@ -27,6 +41,12 @@ tool_revision = "53c129c2efa3b9279d2ecbc237d15acdfb656d8c"
 [jobs.verify]
 scheduler = "crow"
 checks = ["rust"]
+workflow = "repository-jobs"
+command = ["bash", ".ci/run-cached.sh"]
+
+[jobs.native]
+scheduler = "crow"
+checks = ["native"]
 workflow = "repository-jobs"
 command = ["bash", ".ci/run-cached.sh"]
 

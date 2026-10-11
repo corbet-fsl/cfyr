@@ -5,8 +5,8 @@ set -euo pipefail
 : "${CI_COMMIT_SHA:?Missing verified source revision}"
 : "${CI_REPOSITORY_URL:?Missing canonical repository identity}"
 : "${CHECKS:?Missing declared check selection}"
-if [ "$CHECKS" != "rust" ] && [ "$CHECKS" != "resolve-dependencies" ]; then
-  echo "CHECKS must be rust or resolve-dependencies, got: $CHECKS" >&2
+if [ "$CHECKS" != "rust" ] && [ "$CHECKS" != "native" ] && [ "$CHECKS" != "resolve-dependencies" ]; then
+  echo "CHECKS must be rust, native or resolve-dependencies, got: $CHECKS" >&2
   exit 2
 fi
 cache_root=${CI_CACHE_ROOT:-${CARGO_HOME:-}}
@@ -63,7 +63,7 @@ test -f Cargo.lock || { echo 'Missing committed Cargo.lock' >&2; exit 2; }
 if ! "$CARGO_HOME/bin/rustup" target list --toolchain stable --installed 2>/dev/null | grep -qx 'wasm32-unknown-unknown'; then
   "$CARGO_HOME/bin/rustup" target add wasm32-unknown-unknown --toolchain stable
 fi
-if [ "$CHECKS" = "resolve-dependencies" ]; then
+if [ "$CHECKS" = "resolve-dependencies" ] || [ "$CHECKS" = "native" ]; then
   exec "$CCID_BIN" check --repo "$PWD" --check "$CHECKS"
 fi
 "$CCID_BIN" cached --repo "$PWD" --check "$CHECKS"
