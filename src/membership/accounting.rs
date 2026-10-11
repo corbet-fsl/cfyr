@@ -22,6 +22,7 @@ pub struct AccountGrantLease<'p, T> {
     grant: Value,
     device: [u8; 32],
     enrollment_submitted: bool,
+    apply_sent: bool,
 }
 
 struct AccountOwner<'p, T> {
@@ -93,7 +94,7 @@ impl<T: AuthenticatedTransport> AccountOwner<'_, T> {
         let after_send = |error| {
             if matches!(
                 action,
-                "account_credential_issue" | "account_enroll" | "account_checkpoint"
+                "account_credential_issue" | "account_enroll" | "account_checkpoint" | "account"
             ) {
                 Error::Reconcile
             } else {
@@ -220,6 +221,7 @@ impl<'p, T: AuthenticatedTransport> AccountChallenge<'p, T> {
             grant,
             device,
             enrollment_submitted: false,
+            apply_sent: false,
         })
     }
 }
@@ -281,5 +283,21 @@ impl<T: AuthenticatedTransport> AccountGrantLease<'_, T> {
         self.owner
             .call("account_checkpoint", json!({"slot": null}), &mut clock)
             .await
+    }
+    /// Send the exact stored, already signed account operation once through this
+    /// same current member owner. The generated registry validates its wire
+    /// schema. A reopened lease may send the same stored bytes, so this does not
+    /// require an enrollment submitted by this lease. The uncertain outcome after
+    /// sending is Reconcile; the consumer verifies the response independently.
+    pub async fn apply_account(
+        &mut self,
+        wire: Value,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        if self.apply_sent || !wire.is_object() {
+            return Err(Error::Unauthorized);
+        }
+        self.apply_sent = true;
+        self.owner.call("account", wire, &mut clock).await
     }
 }
