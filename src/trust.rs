@@ -32,6 +32,28 @@ impl Trust {
     #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
     pub fn native(configuration: Configuration, config: Config, roots: &[Vec<u8>]) -> Result<Self> {
         let transport = cnvy::http::Http::with_roots(&configuration, roots)?;
+        Self::native_with(configuration, config, transport)
+    }
+
+    /// Configure the same original Charter/Follower for the isolated literal
+    /// wallet's fixed public endpoints. The trusted runtime supplies its wallet
+    /// issuer/ring and exact HTTPS origin; no global passport ring is inferred.
+    #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+    pub fn wallet_native(
+        configuration: Configuration,
+        config: Config,
+        roots: &[Vec<u8>],
+    ) -> Result<Self> {
+        let transport = cnvy::http::Http::wallet_with_roots(&configuration, roots)?;
+        Self::native_with(configuration, config, transport)
+    }
+
+    #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+    fn native_with(
+        configuration: Configuration,
+        config: Config,
+        transport: cnvy::http::Http,
+    ) -> Result<Self> {
         Ok(Self {
             charter: Charter::new(configuration).map_err(Error::Trust)?,
             follower: Follower::new(config)?,
@@ -45,6 +67,23 @@ impl Trust {
     #[cfg(all(feature = "browser", target_arch = "wasm32"))]
     pub fn browser(configuration: Configuration, config: Config) -> Result<Self> {
         let transport = cnvy::browser::Browser::new(&configuration)?;
+        Self::browser_with(configuration, config, transport)
+    }
+
+    /// Configure the original browser HTTPS follower for the literal wallet
+    /// issuer using its two fixed paths and unchanged signed formats.
+    #[cfg(all(feature = "browser", target_arch = "wasm32"))]
+    pub fn wallet_browser(configuration: Configuration, config: Config) -> Result<Self> {
+        let transport = cnvy::browser::Browser::wallet(&configuration)?;
+        Self::browser_with(configuration, config, transport)
+    }
+
+    #[cfg(all(feature = "browser", target_arch = "wasm32"))]
+    fn browser_with(
+        configuration: Configuration,
+        config: Config,
+        transport: cnvy::browser::Browser,
+    ) -> Result<Self> {
         Ok(Self {
             charter: Charter::new(configuration).map_err(Error::Trust)?,
             follower: Follower::new(config)?,

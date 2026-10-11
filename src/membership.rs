@@ -87,9 +87,10 @@ impl<T: Transport> Shared<T> {
 }
 
 /// A public observation, not a membership, lineage or signing capability.
-/// The pseudonym comes from the actual lobby; it is never the session user UUID.
+/// Community identity comes from the actual lobby; wallet identity comes only
+/// from the original authenticated wallet session, never a public constructor.
 pub struct Observation {
-    /// Actual community pseudonym from the original lobby owner.
+    /// Actual community pseudonym or isolated wallet-local authenticated UUID.
     pub member: String,
     /// Actual currently passkey-authorized signing keys from Membership.
     pub device_keys: Vec<[u8; 32]>,
@@ -100,7 +101,13 @@ pub struct Observation {
 /// Weak, non-cloneable read port. It cannot authenticate, forward arbitrary
 /// actions, expose a bearer or keep the owning Foyer alive. Dropping that Foyer
 /// cancels pending reads, including their original transport futures.
-pub struct LiveMembership<T>(Weak<Shared<T>>);
+pub struct LiveMembership<T>(Weak<Shared<T>>, ObservationScope);
+
+#[derive(Clone, Copy)]
+enum ObservationScope {
+    Community,
+    Wallet,
+}
 
 /// One original live observation retaining the exact local session lock. It
 /// cannot be built from public Observation data or extend remote authority.
@@ -112,6 +119,8 @@ pub struct MembershipLease<T> {
     authentication: u64,
     user: String,
     observation: Observation,
+    scope: ObservationScope,
+    credential: Option<Vec<u8>>,
     checked_at: Option<u64>,
     _pending: Pending<T>,
 }
@@ -145,6 +154,10 @@ impl<T> MembershipLease<T> {
             || info.user != self.user
             || info.role != "member"
             || info.expires != self.observation.expires
+            || self
+                .credential
+                .as_ref()
+                .is_some_and(|id| self.held.login_credential.as_ref() != Some(id))
         {
             return Err(Error::Unauthorized);
         }
@@ -178,7 +191,16 @@ impl<T> Foyer<T> {
     /// Give the trusted custody composer only the original live membership read
     /// port. The sole Charter/Follower remains owned by this Foyer.
     pub fn live_membership(&self) -> LiveMembership<T> {
-        LiveMembership(Rc::downgrade(&self.shared))
+        LiveMembership(Rc::downgrade(&self.shared), ObservationScope::Community)
+    }
+}
+
+impl<T: cvld::client::AuthenticatedTransport> Foyer<T> {
+    /// Select the original wallet observation route. It requires an actual
+    /// typed login, current key and eligible device-owner response; this port
+    /// supplies no certified lineage or Keys authority by itself.
+    pub fn live_wallet_membership(&self) -> LiveMembership<T> {
+        LiveMembership(Rc::downgrade(&self.shared), ObservationScope::Wallet)
     }
 }
 
@@ -222,13 +244,16 @@ impl<T: Transport> LiveMembership<T> {
         let observed = Abortable::new(
             async {
                 let mut retained = shared.session.clone().lock_owned().await;
-                let observed = read_held(&mut retained, &shared, started, &mut clock).await?;
+                let observed =
+                    read_held(&mut retained, &shared, self.1, started, &mut clock).await?;
                 Ok(MembershipLease {
                     owner: self.0.clone(),
                     held: retained,
                     authentication: observed.authentication,
                     user: observed.user,
                     observation: observed.observation,
+                    scope: self.1,
+                    credential: observed.credential,
                     checked_at: Some(observed.checked_at),
                     _pending: pending,
                 })
@@ -251,10 +276,12 @@ struct HeldObservation {
     user: String,
     authentication: u64,
     checked_at: u64,
+    credential: Option<Vec<u8>>,
 }
 async fn read_held<T: Transport>(
     retained: &mut Retained<T>,
     shared: &Shared<T>,
+    scope: ObservationScope,
     started: u64,
     clock: &mut impl FnMut() -> u64,
 ) -> Result<HeldObservation> {
@@ -266,24 +293,64 @@ async fn read_held<T: Transport>(
     if info.role != "member" || sending < started || sending >= expires {
         return Err(Error::Unauthorized);
     }
-    let lobby = retained
-        .client
-        .forward("lobby", serde_json::json!({}))
-        .await?;
+    let (member, credential, action) = match scope {
+        ObservationScope::Community => {
+            let lobby = retained
+                .client
+                .forward("lobby", serde_json::json!({}))
+                .await?;
+            let member = lobby
+                .get("member_id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|member| !member.is_empty())
+                .ok_or(Error::Reconcile)?
+                .to_owned();
+            (member, None, "device_keys")
+        }
+        ObservationScope::Wallet => {
+            let credential = retained
+                .login_credential
+                .as_ref()
+                .filter(|id| !id.is_empty())
+                .ok_or(Error::Unauthorized)?
+                .clone();
+            retained
+                .client
+                .forward("global_public", serde_json::json!({}))
+                .await?;
+            let response = retained
+                .client
+                .forward("passkey_list", serde_json::json!({}))
+                .await?;
+            // Current is projected from the server's genuine authenticated key,
+            // not from membership in an arbitrary list of enrolled credentials.
+            let rows = response
+                .get("passkeys")
+                .and_then(serde_json::Value::as_array)
+                .ok_or(Error::Reconcile)?;
+            let mut current = rows.iter().filter(|row| row["current"] == true);
+            let row = current.next().ok_or(Error::Unauthorized)?;
+            if current.next().is_some() || row["revoked"] != false {
+                return Err(Error::Unauthorized);
+            }
+            let actual: Vec<u8> =
+                serde_json::from_value(row["credential"].clone()).map_err(|_| Error::Reconcile)?;
+            if actual != credential {
+                return Err(Error::Unauthorized);
+            }
+            // The UUID comes from the actual authenticated wallet server session.
+            // The eligible wallet device owner performs its own same-key checks.
+            (user.clone(), Some(credential), "wallet_device_keys")
+        }
+    };
     let keys = retained
         .client
-        .forward("device_keys", serde_json::json!({}))
+        .forward(action, serde_json::json!({}))
         .await?;
     let finished = clock();
     if finished < sending || finished >= expires || shared.is_closed() {
         return Err(Error::Unauthorized);
     }
-    let member = lobby
-        .get("member_id")
-        .and_then(serde_json::Value::as_str)
-        .filter(|member| !member.is_empty())
-        .ok_or(Error::Reconcile)?
-        .to_owned();
     let device_keys = serde_json::from_value(keys.get("keys").cloned().ok_or(Error::Reconcile)?)
         .map_err(|_| Error::Reconcile)?;
     Ok(HeldObservation {
@@ -295,6 +362,7 @@ async fn read_held<T: Transport>(
         user,
         authentication,
         checked_at: finished,
+        credential,
     })
 }
 impl<T: Transport> MembershipLease<T> {
@@ -314,7 +382,7 @@ impl<T: Transport> MembershipLease<T> {
             lifetime.pending = Some(abort);
         }
         let observed = Abortable::new(
-            read_held(&mut self.held, &shared, started, clock),
+            read_held(&mut self.held, &shared, self.scope, started, clock),
             registration,
         )
         .await
@@ -323,6 +391,7 @@ impl<T: Transport> MembershipLease<T> {
             || observed.user != self.user
             || observed.observation.expires != self.observation.expires
             || observed.observation.member != self.observation.member
+            || observed.credential != self.credential
         {
             return Err(Error::Unauthorized);
         }

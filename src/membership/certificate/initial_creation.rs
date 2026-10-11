@@ -183,10 +183,25 @@ impl<T: AuthenticatedTransport> InitialCreationLease<'_, T> {
         let floor = self.check(&mut clock)?;
         self.checked_at = None;
         self.certified.refresh_observation(&mut clock).await?;
-        let response = self
-            .certified
-            .initial_request("initial_creation", serde_json::json!({}), false, &mut clock)
-            .await?;
+        // Wallet authority uses the genuine eligible equal bind after the
+        // publication exists. A data-only query never replaces that live cut.
+        let response = match (self.certified.lease.scope, self.publication) {
+            (ObservationScope::Wallet, Some(publication)) => self
+                .certified
+                .initial_request(
+                    "initial_publication_bind",
+                    serde_json::json!({"seed": self.seed, "publication": publication}),
+                    true,
+                    &mut clock,
+                )
+                .await
+                .map_err(|_| Error::Reconcile)?,
+            _ => {
+                self.certified
+                    .initial_request("initial_creation", serde_json::json!({}), false, &mut clock)
+                    .await?
+            }
+        };
         let (seed, publication, server_checked_at) = projection(&response)?;
         let completed = self.certified.check(&mut clock)?;
         if seed != self.seed

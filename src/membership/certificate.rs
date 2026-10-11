@@ -85,6 +85,10 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         policy.check_origin(&self.owner, &origin)?;
         let (credential, expires) = policy
             .with_current(completed, |current| {
+                if matches!(self.scope, ObservationScope::Wallet) && current.community() != "wallet"
+                {
+                    return Err(cnvy::cchr::Error::Unauthenticated);
+                }
                 let certificate =
                     current.passkey_certificate(&signed, &self.observation.member, completed)?;
                 Ok::<_, cnvy::cchr::Error>((
@@ -95,7 +99,7 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             .map_err(|_| Error::Unauthorized)?
             .map_err(|_| Error::Unauthorized)?;
         let expires = expires.min(self.observation.expires);
-        if completed >= expires {
+        if completed >= expires || self.credential.as_ref().is_some_and(|id| id != &credential) {
             return Err(Error::Unauthorized);
         }
         Ok(CertifiedMembershipLease {
@@ -163,6 +167,11 @@ impl<'p, T> CertifiedMembershipLease<'p, T> {
             || now < checked.server_checked_at
             || now >= checked.expires
             || !self.policy.belongs_to(&self.lease.owner)
+            || self
+                .lease
+                .credential
+                .as_ref()
+                .is_some_and(|id| id != &checked.credential)
         {
             return Err(Error::Unauthorized);
         }
@@ -170,6 +179,11 @@ impl<'p, T> CertifiedMembershipLease<'p, T> {
         let expires = self
             .policy
             .with_current(now, |current| {
+                if matches!(self.lease.scope, ObservationScope::Wallet)
+                    && current.community() != "wallet"
+                {
+                    return Err(cnvy::cchr::Error::Unauthenticated);
+                }
                 let certificate = current.passkey_certificate(
                     &self.signed,
                     &self.lease.observation.member,
