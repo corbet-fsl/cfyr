@@ -241,3 +241,201 @@ async fn original_policy_contention_and_callback_unwind_consume_initial_lease() 
     assert!(initial.check(|| NOW).is_err());
     assert!(initial.seed().is_err());
 }
+
+async fn companion(
+    tls: &TlsIngress,
+    service: &Running,
+    keys: &mut cpky::Client<SoftwareAuthenticator>,
+) -> Foyer<crate::HttpClient> {
+    let mut api = Foyer::with_trust(
+        crate::HttpClient::with_roots(
+            tls.origin.clone(),
+            "127.0.0.1".into(),
+            None,
+            std::slice::from_ref(&tls.root),
+        )
+        .unwrap(),
+        trust(service, tls).await,
+    );
+    login(&mut api, keys).await;
+    api
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn held_refresh_observes_actual_new_device_without_renewing_identity_or_deadline() {
+    let (api, tls, service, mut keys, raw_id) = enrolled().await;
+    let mut other = companion(&tls, &service, &mut keys).await;
+    let mut policy = api.current_policy();
+    let mut initial = api
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap()
+        .passkey_certificate(&mut policy, || NOW)
+        .await
+        .unwrap()
+        .initial_creation(|| NOW)
+        .await
+        .unwrap();
+    let deadline = initial.expires().unwrap();
+    let member = initial.observation().unwrap().member.clone();
+    let certificate = initial.certificate_bytes().unwrap().to_vec();
+    let key = ed25519_dalek::SigningKey::from_bytes(&[57; 32])
+        .verifying_key()
+        .to_bytes();
+    assert!(!initial.observation().unwrap().device_keys.contains(&key));
+    other
+        .call("device_authorize", json!({"key":key}))
+        .await
+        .unwrap();
+    assert_eq!(initial.refresh(|| NOW + 1).await.unwrap(), NOW + 1);
+    assert!(initial.observation().unwrap().device_keys.contains(&key));
+    assert_eq!(initial.observation().unwrap().member, member);
+    assert_eq!(initial.credential_id().unwrap(), raw_id);
+    assert_eq!(initial.seed().unwrap(), SEED);
+    assert_eq!(initial.publication().unwrap(), None);
+    assert_eq!(initial.certificate_bytes().unwrap(), certificate);
+    assert_eq!(initial.expires().unwrap(), deadline);
+    assert_eq!(initial.checked_at().unwrap(), NOW + 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_actual_refresh_wait_is_terminal_after_cancel_close_clock_or_expiry() {
+    for action in [5, 6, 3] {
+        for cut in 0..4 {
+            let (api, tls, _service, _keys, _) = enrolled().await;
+            let mut policy = api.current_policy();
+            let mut initial = api
+                .live_membership()
+                .observe_lease(|| NOW)
+                .await
+                .unwrap()
+                .passkey_certificate(&mut policy, || NOW)
+                .await
+                .unwrap()
+                .initial_creation(|| NOW)
+                .await
+                .unwrap();
+            let deadline = initial.expires().unwrap();
+            let time = Arc::new(AtomicU64::new(NOW));
+            let observed = time.clone();
+            tls.gate.action.store(action, Ordering::SeqCst);
+            tls.gate.enabled.store(true, Ordering::SeqCst);
+            let mut pending = Box::pin(initial.refresh(move || observed.load(Ordering::SeqCst)));
+            tokio::select! {
+                result = tokio::time::timeout(Duration::from_secs(5), tls.gate.arrived.notified()) => result.unwrap(),
+                _ = &mut pending => panic!("actual refresh reply must be held"),
+            }
+            match cut {
+                0 => drop(pending),
+                1 => {
+                    api.shared.close();
+                    assert!(pending.await.is_err());
+                }
+                _ => {
+                    time.store(if cut == 2 { NOW - 1 } else { deadline }, Ordering::SeqCst);
+                    tls.gate.release.notify_one();
+                    assert!(pending.await.is_err());
+                }
+            }
+            tls.gate.release.notify_one();
+            assert!(initial.check(|| NOW).is_err());
+            assert!(initial.seed().is_err());
+            assert!(initial.refresh(|| NOW).await.is_err());
+            drop(initial);
+            if cut != 1 {
+                // Dropping the poisoned owner releases its actual session guard.
+                assert!(api.shared.session.try_lock().is_some());
+                assert!(api.live_membership().observe_lease(|| NOW).await.is_ok());
+            }
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn held_refresh_reborrows_actual_revocation_feed_after_device_reply() {
+    let (mut api, tls, service, mut keys, raw_id) = enrolled().await;
+    let mut other = companion(&tls, &service, &mut keys).await;
+    let mut policy = api.current_policy();
+    let mut initial = api
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap()
+        .passkey_certificate(&mut policy, || NOW)
+        .await
+        .unwrap()
+        .initial_creation(|| NOW)
+        .await
+        .unwrap();
+    let time = Arc::new(AtomicU64::new(NOW));
+    let observed = time.clone();
+    tls.gate.action.store(6, Ordering::SeqCst);
+    tls.gate.enabled.store(true, Ordering::SeqCst);
+    let mut pending = Box::pin(initial.refresh(move || observed.load(Ordering::SeqCst)));
+    tokio::select! {
+        result = tokio::time::timeout(Duration::from_secs(5), tls.gate.arrived.notified()) => result.unwrap(),
+        _ = &mut pending => panic!("actual device reply must be held"),
+    }
+    other
+        .call("passkey_revoke", json!({"credential":raw_id}))
+        .await
+        .unwrap();
+    time.store(NOW + 40, Ordering::SeqCst);
+    {
+        let mut current = api.trust().unwrap();
+        assert!(current.poll(|| NOW + 40).await.unwrap());
+        assert!(
+            current
+                .current(NOW + 40)
+                .unwrap()
+                .revocations()
+                .passkey_revoked(&raw_id)
+                .unwrap()
+        );
+    }
+    tls.gate.release.notify_one();
+    assert!(matches!(pending.await, Err(Error::Unauthorized)));
+    assert!(initial.check(|| NOW + 40).is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn held_refresh_cannot_replace_its_original_publication_with_another_winner() {
+    let (api, tls, service, mut keys, _) = enrolled().await;
+    let other = companion(&tls, &service, &mut keys).await;
+    let mut policy = api.current_policy();
+    let mut initial = api
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap()
+        .passkey_certificate(&mut policy, || NOW)
+        .await
+        .unwrap()
+        .initial_creation(|| NOW)
+        .await
+        .unwrap();
+    let mut second_policy = other.current_policy();
+    let winner = other
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap()
+        .passkey_certificate(&mut second_policy, || NOW)
+        .await
+        .unwrap()
+        .initial_creation(|| NOW)
+        .await
+        .unwrap()
+        .bind_publication([101; 32], || NOW)
+        .await
+        .unwrap();
+    assert_eq!(winner.publication().unwrap(), Some([101; 32]));
+    assert!(matches!(
+        initial.refresh(|| NOW).await,
+        Err(Error::Unauthorized)
+    ));
+    assert!(initial.publication().is_err());
+    assert!(initial.check(|| NOW).is_err());
+    assert_eq!(winner.publication().unwrap(), Some([101; 32]));
+}

@@ -218,46 +218,14 @@ impl<T: Transport> LiveMembership<T> {
         let observed = Abortable::new(
             async {
                 let mut retained = shared.session.clone().lock_owned().await;
-                let info = retained.info.as_ref().ok_or(Error::Unauthorized)?;
-                let expires = info.expires;
-                let user = info.user.clone();
-                let authentication = retained.authentication;
-                let sending = clock();
-                if info.role != "member" || sending < started || sending >= expires {
-                    return Err(Error::Unauthorized);
-                }
-                let lobby = retained
-                    .client
-                    .forward("lobby", serde_json::json!({}))
-                    .await?;
-                let keys = retained
-                    .client
-                    .forward("device_keys", serde_json::json!({}))
-                    .await?;
-                let finished = clock();
-                if finished < sending || finished >= expires || shared.lifetime.borrow().closed {
-                    return Err(Error::Unauthorized);
-                }
-                let member = lobby
-                    .get("member_id")
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|member| !member.is_empty())
-                    .ok_or(Error::Reconcile)?
-                    .to_owned();
-                let device_keys =
-                    serde_json::from_value(keys.get("keys").cloned().ok_or(Error::Reconcile)?)
-                        .map_err(|_| Error::Reconcile)?;
+                let observed = read_held(&mut retained, &shared, started, &mut clock).await?;
                 Ok(MembershipLease {
                     owner: self.0.clone(),
                     held: retained,
-                    authentication,
-                    user,
-                    observation: Observation {
-                        member,
-                        device_keys,
-                        expires,
-                    },
-                    checked_at: Some(finished),
+                    authentication: observed.authentication,
+                    user: observed.user,
+                    observation: observed.observation,
+                    checked_at: Some(observed.checked_at),
                     _pending: pending,
                 })
             },
@@ -269,6 +237,94 @@ impl<T: Transport> LiveMembership<T> {
             return Err(Error::Unavailable);
         }
         Ok(observed)
+    }
+}
+
+// One original verifier reused by both the first observation and retained-session
+// refresh. It forwards only these two reads and never installs authentication.
+struct HeldObservation {
+    observation: Observation,
+    user: String,
+    authentication: u64,
+    checked_at: u64,
+}
+async fn read_held<T: Transport>(
+    retained: &mut Retained<T>,
+    shared: &Shared<T>,
+    started: u64,
+    clock: &mut impl FnMut() -> u64,
+) -> Result<HeldObservation> {
+    let info = retained.info.as_ref().ok_or(Error::Unauthorized)?;
+    let expires = info.expires;
+    let user = info.user.clone();
+    let authentication = retained.authentication;
+    let sending = clock();
+    if info.role != "member" || sending < started || sending >= expires {
+        return Err(Error::Unauthorized);
+    }
+    let lobby = retained
+        .client
+        .forward("lobby", serde_json::json!({}))
+        .await?;
+    let keys = retained
+        .client
+        .forward("device_keys", serde_json::json!({}))
+        .await?;
+    let finished = clock();
+    if finished < sending || finished >= expires || shared.is_closed() {
+        return Err(Error::Unauthorized);
+    }
+    let member = lobby
+        .get("member_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|member| !member.is_empty())
+        .ok_or(Error::Reconcile)?
+        .to_owned();
+    let device_keys = serde_json::from_value(keys.get("keys").cloned().ok_or(Error::Reconcile)?)
+        .map_err(|_| Error::Reconcile)?;
+    Ok(HeldObservation {
+        observation: Observation {
+            member,
+            device_keys,
+            expires,
+        },
+        user,
+        authentication,
+        checked_at: finished,
+    })
+}
+impl<T: Transport> MembershipLease<T> {
+    async fn refresh_observation(&mut self, clock: &mut impl FnMut() -> u64) -> Result<u64> {
+        let started = self.check(&mut *clock)?;
+        self.checked_at = None;
+        let shared = self.owner.upgrade().ok_or(Error::Unavailable)?;
+        let (abort, registration) = AbortHandle::new_pair();
+        {
+            let mut lifetime = shared.lifetime.borrow_mut();
+            if lifetime.closed
+                || lifetime.generation != self._pending.generation
+                || lifetime.pending.is_none()
+            {
+                return Err(Error::Unavailable);
+            }
+            lifetime.pending = Some(abort);
+        }
+        let observed = Abortable::new(
+            read_held(&mut self.held, &shared, started, clock),
+            registration,
+        )
+        .await
+        .map_err(|_| Error::Unavailable)??;
+        if observed.authentication != self.authentication
+            || observed.user != self.user
+            || observed.observation.expires != self.observation.expires
+            || observed.observation.member != self.observation.member
+        {
+            return Err(Error::Unauthorized);
+        }
+        self.observation = observed.observation;
+        self.checked_at = Some(observed.checked_at);
+        self.check(clock)
     }
 }
 

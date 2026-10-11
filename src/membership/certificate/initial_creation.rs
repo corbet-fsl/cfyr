@@ -158,6 +158,29 @@ impl<T> InitialCreationLease<'_, T> {
 }
 
 impl<T: AuthenticatedTransport> InitialCreationLease<'_, T> {
+    /// Reread membership and immutable initial provenance through this same
+    /// held HTTPS session. Failure or cancellation permanently consumes this
+    /// lease's check state; the original certificate/session deadline remains.
+    pub async fn refresh(&mut self, mut clock: impl FnMut() -> u64) -> Result<u64> {
+        let floor = self.check(&mut clock)?;
+        self.checked_at = None;
+        self.certified.refresh_observation(&mut clock).await?;
+        let response = self
+            .certified
+            .initial_request("initial_creation", serde_json::json!({}), false, &mut clock)
+            .await?;
+        let (seed, publication, server_checked_at) = projection(&response)?;
+        let completed = self.certified.check(&mut clock)?;
+        if seed != self.seed
+            || publication != self.publication
+            || completed < floor.max(server_checked_at)
+        {
+            return Err(Error::Unauthorized);
+        }
+        self.checked_at = Some(completed);
+        self.check(clock)
+    }
+
     /// Bind exactly one original candidate's publication commitment using the
     /// server's same-key compare-and-set. Equal retries agree; a different winner
     /// refuses. Unknown completion consumes this attempt and requires a fresh

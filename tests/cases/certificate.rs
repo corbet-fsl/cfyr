@@ -135,6 +135,8 @@ impl TlsIngress {
                                 2 => "/v1/register_finish",
                                 3 => "/v1/initial_creation",
                                 4 => "/v1/initial_publication_bind",
+                                5 => "/v1/lobby",
+                                6 => "/v1/device_keys",
                                 _ => "/v1/passkey_certificate",
                             };
                             if path == selected && paused.enabled.swap(false, Ordering::SeqCst) {

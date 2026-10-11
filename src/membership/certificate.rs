@@ -113,6 +113,18 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
     }
 }
 
+impl<T: AuthenticatedTransport> CertifiedMembershipLease<'_, T> {
+    async fn refresh_observation(&mut self, clock: &mut impl FnMut() -> u64) -> Result<u64> {
+        self.check(&mut *clock)?;
+        let checked = self.checked.take().ok_or(Error::Unauthorized)?;
+        self.lease.refresh_observation(clock).await?;
+        self.checked = Some(checked);
+        // Verify the same genuine certificate under this owner's current Charter
+        // after the fresh membership reads. Its exclusive lifetime never renews.
+        self.check(clock)
+    }
+}
+
 impl<'p, T> CertifiedMembershipLease<'p, T> {
     /// Actual original member/device observation, never remote frozen authority.
     pub fn observation(&self) -> Result<&Observation> {
