@@ -21,6 +21,7 @@ pub struct AccountGrantLease<'p, T> {
     signed_request: Vec<u8>,
     grant: Value,
     device: [u8; 32],
+    enrollment_submitted: bool,
 }
 
 struct AccountOwner<'p, T> {
@@ -90,7 +91,10 @@ impl<T: AuthenticatedTransport> AccountOwner<'_, T> {
         // observation cannot establish whether issuance committed. Never expose
         // an ordinary retryable failure for that uncertain write boundary.
         let after_send = |error| {
-            if action == "account_credential_issue" {
+            if matches!(
+                action,
+                "account_credential_issue" | "account_enroll" | "account_checkpoint"
+            ) {
                 Error::Reconcile
             } else {
                 error
@@ -215,6 +219,7 @@ impl<'p, T: AuthenticatedTransport> AccountChallenge<'p, T> {
             signed_request: self.signed_request,
             grant,
             device,
+            enrollment_submitted: false,
         })
     }
 }
@@ -242,5 +247,39 @@ impl<T> AccountGrantLease<'_, T> {
             .with_current(&mut clock, |current, member, origin, now| {
                 inspect(current, member, origin, signed, grant, device, now)
             })
+    }
+}
+
+impl<T: AuthenticatedTransport> AccountGrantLease<'_, T> {
+    /// Submit the original signed delegation once through this same current
+    /// member owner. The generated registry validates its exact wire schema;
+    /// the accounting consumer must still compare the original response with
+    /// its verified delegation. This never installs a checkpoint or account.
+    pub async fn submit_enrollment(
+        &mut self,
+        delegation: Value,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        if self.enrollment_submitted || !delegation.is_object() {
+            return Err(Error::Unauthorized);
+        }
+        self.enrollment_submitted = true;
+        self.owner
+            .call("account_enroll", delegation, &mut clock)
+            .await
+    }
+    /// Acquire the actual current common checkpoint through the same retained
+    /// HTTPS owner. The fixed omitted slot may install a publication: uncertain
+    /// completion is Reconcile, and response bytes remain unverified public data.
+    pub async fn current_enrollment_checkpoint(
+        &mut self,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        if !self.enrollment_submitted {
+            return Err(Error::Unauthorized);
+        }
+        self.owner
+            .call("account_checkpoint", json!({"slot": null}), &mut clock)
+            .await
     }
 }
