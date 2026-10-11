@@ -111,7 +111,8 @@ impl TlsIngress {
                                 | "/v1/trust_feed" | "/v1/trust_changes" | "/v1/passkey_certificate"
                                 | "/v1/passkey_add" | "/v1/passkey_revoke"
                                 | "/v1/initial_registration_begin" | "/v1/initial_creation"
-                                | "/v1/initial_publication_bind"));
+                                | "/v1/initial_publication_bind" | "/v1/presentation_challenge"
+                                | "/v1/account_credential_issue"));
                             // Fixed, test-owned virtual-host ingress route. It never
                             // takes the upstream URL or Host from request JSON.
                             // The WebAuthn vault realm stays the original VAULT;
@@ -137,6 +138,8 @@ impl TlsIngress {
                                 4 => "/v1/initial_publication_bind",
                                 5 => "/v1/lobby",
                                 6 => "/v1/device_keys",
+                                7 => "/v1/presentation_challenge",
+                                8 => "/v1/account_credential_issue",
                                 _ => "/v1/passkey_certificate",
                             };
                             if path == selected && paused.enabled.swap(false, Ordering::SeqCst) {
@@ -582,3 +585,6 @@ async fn actual_passkey_revocation_feed_is_reborrowed_after_certificate_wait() {
 
 #[path = "initial_registration.rs"]
 mod initial_registration;
+
+#[path = "accounting.rs"]
+mod accounting;

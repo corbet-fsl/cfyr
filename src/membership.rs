@@ -4,7 +4,9 @@ use futures::{
     future::{AbortHandle, AbortRegistration, Abortable},
     lock::{Mutex, OwnedMutexGuard},
 };
+mod accounting;
 mod certificate;
+pub use accounting::{AccountChallenge, AccountGrantLease};
 mod global;
 mod global_initial;
 pub use certificate::{CertifiedMembershipLease, InitialCreationLease, RegisteredCertificateLease};
