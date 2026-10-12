@@ -4,6 +4,9 @@ use crate::policy::CurrentPolicy;
 use cvld::client::AuthenticatedTransport;
 use serde_json::{Value, json};
 
+/// Largest community credential accepted from the server.
+pub const MAX_COMMUNITY_CREDENTIAL_BYTES: usize = 16 * 1024;
+
 /// One original server challenge retained with its exact HTTPS/member owner.
 /// The wallet must authenticate `signed_request` using its current Charter and
 /// use the original global passport owner. This is not a passport or admission.
@@ -20,6 +23,7 @@ pub struct AccountGrantLease<'p, T> {
     owner: AccountOwner<'p, T>,
     signed_request: Vec<u8>,
     grant: Value,
+    credential: Vec<u8>,
     device: [u8; 32],
     enrollment_submitted: bool,
     apply_sent: bool,
@@ -210,6 +214,18 @@ impl<'p, T: AuthenticatedTransport> AccountChallenge<'p, T> {
         {
             return Err(Error::Reconcile);
         }
+        // The same admission decision that issued the grant issued the community
+        // credential. It is public signed data; the consumer stores it in the Vault.
+        let credential: Vec<u8> = serde_json::from_value(
+            response
+                .get("credential")
+                .cloned()
+                .ok_or(Error::Reconcile)?,
+        )
+        .map_err(|_| Error::Reconcile)?;
+        if credential.is_empty() || credential.len() > MAX_COMMUNITY_CREDENTIAL_BYTES {
+            return Err(Error::Reconcile);
+        }
         let grant = response
             .get("account")
             .filter(|a| a.is_object())
@@ -219,6 +235,7 @@ impl<'p, T: AuthenticatedTransport> AccountChallenge<'p, T> {
             owner: self.owner,
             signed_request: self.signed_request,
             grant,
+            credential,
             device,
             enrollment_submitted: false,
             apply_sent: false,
@@ -227,6 +244,13 @@ impl<'p, T: AuthenticatedTransport> AccountChallenge<'p, T> {
 }
 
 impl<T> AccountGrantLease<'_, T> {
+    /// The signed community credential issued with this grant, exactly as the
+    /// server returned it. It authorizes nothing by itself: Profile and Guard
+    /// verify it, and the Vault stores it.
+    pub fn community_credential(&self) -> &[u8] {
+        &self.credential
+    }
+
     /// Reborrow the actual current response owner. The account consumer must
     /// strictly decode the original grant and verify every independent binding.
     pub fn with_current<R>(
@@ -299,5 +323,72 @@ impl<T: AuthenticatedTransport> AccountGrantLease<'_, T> {
         }
         self.apply_sent = true;
         self.owner.call("account", wire, &mut clock).await
+    }
+}
+
+impl<T: AuthenticatedTransport> MembershipLease<T> {
+    /// Read the member's lobby (missing requirements and gate steps) through this
+    /// held lease. Read-only; a changed member refuses.
+    pub async fn lobby(&mut self, mut clock: impl FnMut() -> u64) -> Result<Value> {
+        self.forward_gate("lobby", json!({}), false, &mut clock)
+            .await
+    }
+
+    /// Submit one member-bound voucher, given in its `cvch1.` text form, through
+    /// this held lease. The server decides admission; the answer is the lobby. A
+    /// lost response is Reconcile, because the voucher may have been spent.
+    pub async fn submit_voucher(
+        &mut self,
+        code: &str,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        let voucher = cvch::Voucher::from_code(code.trim()).map_err(|_| Error::Invalid)?;
+        let voucher = serde_json::to_value(&voucher).map_err(|_| Error::Invalid)?;
+        self.forward_gate("gate_voucher", voucher, true, &mut clock)
+            .await
+    }
+
+    async fn forward_gate(
+        &mut self,
+        action: &str,
+        input: Value,
+        uncertain_after_send: bool,
+        clock: &mut impl FnMut() -> u64,
+    ) -> Result<Value> {
+        if !matches!(self.scope, ObservationScope::Community) {
+            return Err(Error::Unauthorized);
+        }
+        self.check(&mut *clock)?;
+        self.refresh_observation(clock).await?;
+        let shared = self.owner.upgrade().ok_or(Error::Unavailable)?;
+        let (abort, registration) = AbortHandle::new_pair();
+        {
+            let mut lifetime = shared.lifetime.borrow_mut();
+            if lifetime.closed
+                || lifetime.generation != self._pending.generation
+                || lifetime.pending.is_none()
+            {
+                return Err(Error::Unavailable);
+            }
+            lifetime.pending = Some(abort);
+        }
+        // Only a lost answer is uncertain; a verdict the server gave (refused,
+        // invalid, throttled) is exactly that and stays plain.
+        let after_send = |error| match error {
+            Error::Unavailable if uncertain_after_send => Error::Reconcile,
+            other => other,
+        };
+        let response = Abortable::new(self.held.client.forward(action, input), registration)
+            .await
+            .map_err(|_| after_send(Error::Unavailable))?
+            .map_err(after_send)?;
+        self.refresh_observation(clock).await.map_err(after_send)?;
+        // Both gate answers are the lobby of exactly this member.
+        if response.get("member_id").and_then(Value::as_str)
+            != Some(self.observation.member.as_str())
+        {
+            return Err(Error::Reconcile);
+        }
+        Ok(response)
     }
 }

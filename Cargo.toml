@@ -22,6 +22,7 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 futures = "0.3"
 cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "v01" }
+cvch = { git = "https://git.corbet.ch/corbet-foss/cvch", branch = "main" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 url = "2"
@@ -32,7 +33,6 @@ cpsd = { git = "https://git.corbet.ch/corbet-foss/cpsd", branch = "main", defaul
 csgn = { git = "https://git.corbet.ch/corbet-foss/csgn", branch = "main", features = ["libsql"] }
 cgbl = { git = "https://git.corbet.ch/corbet-libs/cgbl.git", branch = "main" }
 ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main" }
-cvch = { git = "https://git.corbet.ch/corbet-foss/cvch", branch = "main" }
 cpns = { git = "https://git.corbet.ch/corbet-foss/cpns", branch = "main" }
 ed25519-dalek = { version = "2.2" }
 axum = { version = "0.8.9" }
