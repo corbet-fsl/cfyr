@@ -7,6 +7,9 @@
 pub use cvld::client::BrowserClient;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub use cvld::client::HttpClient;
+/// Door calls through Oblivious HTTP over any cblv `Wire`.
+#[cfg(feature = "ohttp")]
+pub use cvld::client::OhttpClient;
 pub use cvld::client::{
     Action, SessionInfo, SessionTransport, Transport, forwarding_action as action,
     forwarding_contract as contract,
