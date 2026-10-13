@@ -15,6 +15,8 @@ pub use cvld::client::{
     forwarding_contract as contract,
 };
 pub use cvld::error::{Error, Result};
+/// Address rules and the blind creation-token client of the owner contract.
+pub use cvld::{address, creation_token};
 use futures::lock::{MappedMutexGuard, Mutex, MutexGuard};
 use serde_json::Value;
 use std::rc::Rc;

@@ -23,6 +23,8 @@ pub struct AccountChallenge<'p, T> {
     owner: AccountOwner<'p, T>,
     challenge: String,
     signed_request: Vec<u8>,
+    /// Creation id presented with the admission of a community's creator.
+    creation: Option<String>,
 }
 
 /// Actual account issuance response under the same retained current owner.
@@ -163,11 +165,19 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             owner,
             challenge,
             signed_request,
+            creation: None,
         })
     }
 }
 
 impl<T> AccountChallenge<'_, T> {
+    /// Present the creation id of a community this member just claimed, so the
+    /// same admission decision seats the creator as first admin.
+    pub fn with_creation(mut self, id: String) -> Self {
+        self.creation = Some(id);
+        self
+    }
+
     /// Reborrow the original current Charter and exact signed request. The
     /// callback must use the maintained request verifier; these bytes alone do
     /// not establish a global holder, cohort or account authority.
@@ -201,15 +211,17 @@ impl<'p, T: AuthenticatedTransport> AccountChallenge<'p, T> {
         {
             return Err(Error::Unauthorized);
         }
+        let mut credential = json!({ "presentation": {
+            "challenge": self.challenge, "proof": presentation
+        }, "devices": [device] });
+        if let Some(id) = &self.creation {
+            credential["creation"] = json!(id);
+        }
         let response = self
             .owner
             .call(
                 "account_credential_issue",
-                json!({
-                    "credential": { "presentation": {
-                        "challenge": self.challenge, "proof": presentation
-                    }, "devices": [device] }, "device": device
-                }),
+                json!({ "credential": credential, "device": device }),
                 &mut clock,
             )
             .await?;
