@@ -153,9 +153,7 @@ async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_voucher_link() 
     // Text that is not a voucher link never reaches the server.
     for bad in ["", "garbage", "cvch1.", "cvch2.AAAA"] {
         assert!(matches!(
-            lease
-                .submit_voucher(bad, "alpha", None, [1; 16], || NOW)
-                .await,
+            lease.submit_voucher(bad, None, [1; 16], || NOW).await,
             Err(crate::Error::Invalid)
         ));
     }
@@ -163,7 +161,7 @@ async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_voucher_link() 
     let (unknown, _) = cvch::link::Token::generate().unwrap();
     assert!(matches!(
         lease
-            .submit_voucher(&unknown.fragment(), "alpha", None, [1; 16], || NOW)
+            .submit_voucher(&unknown.fragment(), None, [1; 16], || NOW)
             .await,
         Err(crate::Error::Refused)
     ));
@@ -176,13 +174,13 @@ async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_voucher_link() 
         .unwrap();
     let link = own["link"].as_str().unwrap();
     let after = lease
-        .submit_voucher(link, "alpha", Some("handle"), [1; 16], || NOW)
+        .submit_voucher(link, Some("handle"), [1; 16], || NOW)
         .await
         .unwrap();
     assert_eq!(after.lobby["member_id"], member.as_str());
     assert!(
         lease
-            .submit_voucher(link, "alpha", Some("handle"), [1; 16], || NOW)
+            .submit_voucher(link, Some("handle"), [1; 16], || NOW)
             .await
             .is_err()
     );
@@ -290,10 +288,18 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
     assert!(lease.passkey_add_begin(wrong, || NOW).await.is_err());
     // A step-up older than the freshness window is refused.
     let stale = prove(&mut lease, StepUpAction::PasskeyAdd).await;
-    assert!(lease.passkey_add_begin(stale, || NOW + 10_000).await.is_err());
+    assert!(
+        lease
+            .passkey_add_begin(stale, || NOW + 10_000)
+            .await
+            .is_err()
+    );
     // A proof is single use.
     let proof = prove(&mut lease, StepUpAction::PasskeyAdd).await;
-    let begin = lease.passkey_add_begin(proof.clone(), || NOW).await.unwrap();
+    let begin = lease
+        .passkey_add_begin(proof.clone(), || NOW)
+        .await
+        .unwrap();
     assert_eq!(begin["step"], "challenge");
     assert!(lease.passkey_add_begin(proof, || NOW).await.is_err());
     // Finish only for the ceremony this lease began.
@@ -322,6 +328,9 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
     let wrong = prove(&mut lease, StepUpAction::PasskeyAdd).await;
     assert!(lease.passkey_revoke(&id, wrong, || NOW).await.is_err());
     let proof = prove(&mut lease, StepUpAction::PasskeyRevoke { credential: &id }).await;
-    lease.passkey_revoke(&id, proof.clone(), || NOW).await.unwrap();
+    lease
+        .passkey_revoke(&id, proof.clone(), || NOW)
+        .await
+        .unwrap();
     assert!(lease.passkey_revoke(&id, proof, || NOW).await.is_err());
 }

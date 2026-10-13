@@ -392,7 +392,6 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
     pub async fn submit_voucher(
         &mut self,
         link: &str,
-        community: &str,
         handle: Option<&str>,
         nonce: [u8; cvch::link::NONCE_BYTES],
         mut clock: impl FnMut() -> u64,
@@ -405,8 +404,7 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             nonce,
             handle: handle.map(str::to_owned),
         };
-        let request =
-            cvch::link::Request::new(&token, community, &notice).map_err(|_| Error::Invalid)?;
+        let request = cvch::link::Request::new(&token, &notice).map_err(|_| Error::Invalid)?;
         let lobby = self
             .forward_gate(
                 "voucher_redeem",
@@ -417,7 +415,7 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             .await?;
         Ok(VoucherRedeemed {
             lobby,
-            bond: token.bond(community, &member, &nonce),
+            bond: token.bond(&member, &nonce),
         })
     }
 
