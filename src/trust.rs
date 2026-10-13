@@ -129,17 +129,17 @@ impl Trust {
     /// configured, the feed must carry the genesis and an unbroken key chain.
     /// A `pin` recorded by this device earlier forbids rollback and forks.
     #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
-    pub fn anchored_native(
-        anchor: &Anchor<'_>,
-        config: Config,
-        roots: &[Vec<u8>],
-    ) -> Result<Self> {
+    pub fn anchored_native(anchor: &Anchor<'_>, config: Config, roots: &[Vec<u8>]) -> Result<Self> {
         let transport = cnvy::http::Http::for_origin(anchor.origin, anchor.community, roots)?;
         Self::anchored_with(anchor, config, transport)
     }
 
     #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
-    fn anchored_with(anchor: &Anchor<'_>, config: Config, transport: cnvy::http::Http) -> Result<Self> {
+    fn anchored_with(
+        anchor: &Anchor<'_>,
+        config: Config,
+        transport: cnvy::http::Http,
+    ) -> Result<Self> {
         Ok(Self {
             charter: anchor.charter()?,
             fingerprint: Some(anchor.fingerprint),
