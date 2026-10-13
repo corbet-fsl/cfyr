@@ -5,10 +5,16 @@ set -euo pipefail
 : "${CI_COMMIT_SHA:?Missing verified source revision}"
 : "${CI_REPOSITORY_URL:?Missing canonical repository identity}"
 : "${CHECKS:?Missing declared check selection}"
+if [ "$CHECKS" != "rust" ] && [ "$CHECKS" != "native" ] && [ "$CHECKS" != "resolve-dependencies" ]; then
+  echo "CHECKS must be rust, native or resolve-dependencies, got: $CHECKS" >&2
+  exit 2
+fi
 cache_root=${CI_CACHE_ROOT:-${CARGO_HOME:-}}
 [[ $cache_root = /* ]] || { echo 'An absolute persistent CI_CACHE_ROOT or CARGO_HOME is required' >&2; exit 2; }
 namespace=$(printf '%s' "$CI_REPOSITORY_URL" | sha256sum | cut -c1-24)
 state="$cache_root/ccid-cached/$namespace"
+export ARTIFACT_ROOT="$state/release-artifacts"
+mkdir -p "$ARTIFACT_ROOT"
 toolchains=${CI_TOOLCHAIN_ROOT:-$cache_root/ccid-cached/toolchains}
 [[ $toolchains = /* ]] || { echo 'CI_TOOLCHAIN_ROOT must be absolute' >&2; exit 2; }
 mkdir -p "$state" "$toolchains"
@@ -16,6 +22,8 @@ exec 9>"$state/lock"
 flock -w "${CI_TIMEOUT:-2700}" 9
 mkdir -p "$state/moon-cache/hashes" "$state/moon-cache/outputs" "$state/moon-home"
 mkdir -p .moon/cache
+ln -s "$state/moon-cache/hashes" .moon/cache/hashes
+ln -s "$state/moon-cache/outputs" .moon/cache/outputs
 # Tool installation is an explicit part of this job, in persistent CI storage.
 tool_source=github:NixOS/nixpkgs/b7c2ada94fe99c15b0dbcf4d11fd7850b957a436
 tool_paths=$(nix build --no-link --print-out-paths "$tool_source#moon" "$tool_source#proto")
@@ -54,6 +62,13 @@ test -f Cargo.lock || { echo 'Missing committed Cargo.lock' >&2; exit 2; }
 # Ensure the Wasm target required by the gates is present (idempotent).
 if ! "$CARGO_HOME/bin/rustup" target list --toolchain stable --installed 2>/dev/null | grep -qx 'wasm32-unknown-unknown'; then
   "$CARGO_HOME/bin/rustup" target add wasm32-unknown-unknown --toolchain stable
+fi
+if [ "$CHECKS" = "resolve-dependencies" ]; then
+  exec "$CCID_BIN" check --repo "$PWD" --check "$CHECKS"
+fi
+if [ "$CHECKS" = "native" ]; then
+  # The test servers link OpenSSL; run inside the pinned shell that provides it.
+  exec env NIX_BUILD_SHELL=bash nix-shell .ci/check-shell.nix --run 'exec "$CCID_BIN" check --repo "$PWD" --check native'
 fi
 "$CCID_BIN" cached --repo "$PWD" --check "$CHECKS"
 IFS=, read -r -a selected_checks <<< "$CHECKS"
