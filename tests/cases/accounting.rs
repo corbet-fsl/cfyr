@@ -136,8 +136,8 @@ async fn sent_account_issue_refuses_unknown_completion_as_reconcile() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_member_voucher() {
-    let f = Fixture::new().await;
+async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_voucher_link() {
+    let mut f = Fixture::new().await;
     let mut lease = f
         .foyer
         .live_membership()
@@ -150,30 +150,42 @@ async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_member_voucher(
         !lobby["missing"].as_array().unwrap().is_empty(),
         "a new member still lacks admission"
     );
-    // Text that is not a voucher never reaches the server.
-    for bad in ["", "garbage", "cvch1.", "cvch1.AAAA"] {
+    // Text that is not a voucher link never reaches the server.
+    for bad in ["", "garbage", "cvch1.", "cvch2.AAAA"] {
         assert!(matches!(
-            lease.submit_voucher(bad, || NOW).await,
+            lease
+                .submit_voucher(bad, "alpha", None, [1; 16], || NOW)
+                .await,
             Err(crate::Error::Invalid)
         ));
     }
-    // A voucher bound to another member is the server's verdict, kept plain.
-    let foreign = voucher("alpha", "someone-else", "held-lease-foreign", NOW + 172800);
-    let foreign: cvch::Voucher = serde_json::from_value(foreign).unwrap();
+    // A well-formed link the server never registered is its verdict, kept plain.
+    let (unknown, _) = cvch::link::Token::generate().unwrap();
     assert!(matches!(
         lease
-            .submit_voucher(&foreign.to_code().unwrap(), || NOW)
+            .submit_voucher(&unknown.fragment(), "alpha", None, [1; 16], || NOW)
             .await,
         Err(crate::Error::Refused)
     ));
-    // The member's own voucher is accepted and answers that member's lobby; the
-    // second submission is spent and refused.
+    // A registered link is accepted and answers that member's lobby; the second
+    // submission by the same member is spent and refused.
     let own = voucher("alpha", &member, "held-lease-own", NOW + 172800);
-    let own: cvch::Voucher = serde_json::from_value(own).unwrap();
-    let code = own.to_code().unwrap();
-    let after = lease.submit_voucher(&code, || NOW).await.unwrap();
-    assert_eq!(after["member_id"], member.as_str());
-    assert!(lease.submit_voucher(&code, || NOW).await.is_err());
+    f.registered
+        .call("development_voucher_link", own["seed"].clone())
+        .await
+        .unwrap();
+    let link = own["link"].as_str().unwrap();
+    let after = lease
+        .submit_voucher(link, "alpha", Some("handle"), [1; 16], || NOW)
+        .await
+        .unwrap();
+    assert_eq!(after.lobby["member_id"], member.as_str());
+    assert!(
+        lease
+            .submit_voucher(link, "alpha", Some("handle"), [1; 16], || NOW)
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
