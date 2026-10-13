@@ -313,3 +313,44 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
     lease.passkey_revoke(&id, proof.clone(), || NOW).await.unwrap();
     assert!(lease.passkey_revoke(&id, proof, || NOW).await.is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_paired_device_key_is_pending_until_confirmed_and_revocable_with_its_own_step_up() {
+    use crate::membership::{StepUpAction, StepUpProof};
+    let mut f = Fixture::new().await;
+    let key = [44u8; 32];
+    let mut lease = f
+        .foyer
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap();
+    let mut prove = async |lease: &mut crate::membership::MembershipLease<_>,
+                           action: StepUpAction<'_>| {
+        let begin = lease.step_up_begin(action, || NOW).await.unwrap();
+        let (credential, _) = f
+            .passkeys
+            .sign_in(begin["options"].clone())
+            .await
+            .unwrap()
+            .into_parts();
+        StepUpProof::new(
+            begin["ceremony"].as_str().unwrap().into(),
+            credential.into_json(),
+        )
+        .unwrap()
+    };
+    // Pending: accepted, but the key is not live and a revoke proof does not open it.
+    let proof = prove(&mut lease, StepUpAction::DeviceAuthorize { key }).await;
+    lease.device_pair_authorize(key, proof, || NOW).await.unwrap();
+    assert!(!lease.observation().device_keys.contains(&key));
+    let wrong = prove(&mut lease, StepUpAction::DeviceAuthorize { key }).await;
+    assert!(lease.device_revoke(key, wrong, || NOW).await.is_err());
+    // Confirmed: live.
+    lease.device_confirm(key, || NOW).await.unwrap();
+    assert!(lease.observation().device_keys.contains(&key));
+    // Revoked with its own step-up: gone.
+    let proof = prove(&mut lease, StepUpAction::DeviceRevoke { key }).await;
+    lease.device_revoke(key, proof, || NOW).await.unwrap();
+    assert!(!lease.observation().device_keys.contains(&key));
+}

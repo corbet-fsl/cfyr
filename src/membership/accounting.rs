@@ -466,6 +466,71 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         Ok(response)
     }
 
+    /// Pairing, new device's own session: authorize its key as PENDING with a step-up for
+    /// exactly that key. A pending key grants nothing and expires on its own, so the answer
+    /// and the observation must NOT list it yet. A lost answer is Reconcile.
+    pub async fn device_pair_authorize(
+        &mut self,
+        key: [u8; 32],
+        step_up: StepUpProof,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        self.take_step_up(&StepUpAction::DeviceAuthorize { key }, &step_up, clock())?;
+        let response = self
+            .forward_member(
+                "device_pair_authorize",
+                json!({ "key": key, "step_up": step_up.wire() }),
+                true,
+                &mut clock,
+            )
+            .await?;
+        if lists(&response, &key) || self.observation.device_keys.contains(&key) {
+            return Err(Error::Reconcile);
+        }
+        Ok(response)
+    }
+
+    /// Pairing: make this session's pending key live, after its lineage revision is
+    /// published. The answer and the refreshed observation must list it. A lost answer is
+    /// Reconcile (the confirmation may have happened).
+    pub async fn device_confirm(
+        &mut self,
+        key: [u8; 32],
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        let response = self
+            .forward_member("device_confirm", json!({ "key": key }), true, &mut clock)
+            .await?;
+        if !lists(&response, &key) || !self.observation.device_keys.contains(&key) {
+            return Err(Error::Reconcile);
+        }
+        Ok(response)
+    }
+
+    /// Remove one device key (live or pending) of this account with a step-up for exactly
+    /// that key. The answer and the refreshed observation must no longer list it. A lost
+    /// answer is Reconcile.
+    pub async fn device_revoke(
+        &mut self,
+        key: [u8; 32],
+        step_up: StepUpProof,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        self.take_step_up(&StepUpAction::DeviceRevoke { key }, &step_up, clock())?;
+        let response = self
+            .forward_member(
+                "device_revoke",
+                json!({ "key": key, "step_up": step_up.wire() }),
+                true,
+                &mut clock,
+            )
+            .await?;
+        if lists(&response, &key) || self.observation.device_keys.contains(&key) {
+            return Err(Error::Reconcile);
+        }
+        Ok(response)
+    }
+
     /// First half of registering another passkey: the server's registration
     /// challenge for the step-up-authorized request.
     pub async fn passkey_add_begin(
@@ -608,6 +673,13 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
     }
 }
 
+fn lists(response: &Value, key: &[u8; 32]) -> bool {
+    response
+        .get("keys")
+        .and_then(Value::as_array)
+        .is_some_and(|keys| keys.contains(&json!(key)))
+}
+
 const STEP_UP_FRESH_SECONDS: u64 = 120;
 
 /// The step-up this lease began and has not yet spent.
@@ -632,6 +704,11 @@ pub enum StepUpAction<'a> {
         /// The device's public signing key.
         key: [u8; 32],
     },
+    /// Remove this exact device signing key, live or pending.
+    DeviceRevoke {
+        /// The device's public signing key.
+        key: [u8; 32],
+    },
 }
 
 impl StepUpAction<'_> {
@@ -642,6 +719,7 @@ impl StepUpAction<'_> {
                 json!({ "kind": "passkey_revoke", "credential": credential })
             }
             Self::DeviceAuthorize { key } => json!({ "kind": "device_authorize", "key": key }),
+            Self::DeviceRevoke { key } => json!({ "kind": "device_revoke", "key": key }),
         }
     }
 }
