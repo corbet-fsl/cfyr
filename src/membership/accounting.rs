@@ -348,7 +348,122 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             .await
     }
 
+    /// Begin a fresh user-verifying passkey assertion for exactly one account
+    /// action (`passkey_add`, `passkey_revoke` or `device_authorize`). Nothing
+    /// changes on the server; the answer carries the ceremony and WebAuthn options
+    /// for the member's ordinary ceremony path (browser vault frame or the embedded
+    /// authenticator). The assertion itself never passes through here.
+    pub async fn step_up_begin(
+        &mut self,
+        action: StepUpAction<'_>,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        self.forward_member(
+            "step_up_begin",
+            json!({ "action": action.wire() }),
+            false,
+            &mut clock,
+        )
+        .await
+    }
+
+    /// Bind one lineage device key to this account with a completed step-up
+    /// assertion for exactly that key. The answer lists the account's current
+    /// device keys and must contain the new one. A lost answer is Reconcile: the
+    /// key may have been bound.
+    pub async fn device_authorize(
+        &mut self,
+        key: [u8; 32],
+        step_up: StepUpProof,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        let response = self
+            .forward_member(
+                "device_authorize",
+                json!({ "key": key, "step_up": step_up.wire() }),
+                true,
+                &mut clock,
+            )
+            .await?;
+        let listed = response
+            .get("keys")
+            .and_then(Value::as_array)
+            .is_some_and(|keys| keys.contains(&json!(key)));
+        if !listed || !self.observation.device_keys.contains(&key) {
+            return Err(Error::Reconcile);
+        }
+        Ok(response)
+    }
+
+    /// First half of registering another passkey: the server's registration
+    /// challenge for the step-up-authorized request.
+    pub async fn passkey_add_begin(
+        &mut self,
+        step_up: StepUpProof,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        self.forward_member(
+            "passkey_add",
+            json!({ "step": "begin", "step_up": step_up.wire() }),
+            false,
+            &mut clock,
+        )
+        .await
+    }
+
+    /// Second half: the new passkey's registration. A lost answer is Reconcile.
+    pub async fn passkey_add_finish(
+        &mut self,
+        ceremony: &str,
+        credential: Value,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        self.forward_member(
+            "passkey_add",
+            json!({ "step": "finish", "ceremony": ceremony, "credential": credential }),
+            true,
+            &mut clock,
+        )
+        .await
+    }
+
+    /// Revoke one passkey of this account with a step-up assertion for exactly
+    /// that credential. A lost answer is Reconcile.
+    pub async fn passkey_revoke(
+        &mut self,
+        credential: &[u8],
+        step_up: StepUpProof,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        self.forward_member(
+            "passkey_revoke",
+            json!({ "credential": credential, "step_up": step_up.wire() }),
+            true,
+            &mut clock,
+        )
+        .await
+    }
+
     async fn forward_gate(
+        &mut self,
+        action: &str,
+        input: Value,
+        uncertain_after_send: bool,
+        clock: &mut impl FnMut() -> u64,
+    ) -> Result<Value> {
+        let response = self
+            .forward_member(action, input, uncertain_after_send, clock)
+            .await?;
+        // Both gate answers are the lobby of exactly this member.
+        if response.get("member_id").and_then(Value::as_str)
+            != Some(self.observation.member.as_str())
+        {
+            return Err(Error::Reconcile);
+        }
+        Ok(response)
+    }
+
+    async fn forward_member(
         &mut self,
         action: &str,
         input: Value,
@@ -383,12 +498,61 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             .map_err(|_| after_send(Error::Unavailable))?
             .map_err(after_send)?;
         self.refresh_observation(clock).await.map_err(after_send)?;
-        // Both gate answers are the lobby of exactly this member.
-        if response.get("member_id").and_then(Value::as_str)
-            != Some(self.observation.member.as_str())
-        {
-            return Err(Error::Reconcile);
-        }
         Ok(response)
+    }
+}
+
+/// The one account-authority action a step-up assertion authorizes.
+#[derive(Clone, Copy, Debug)]
+pub enum StepUpAction<'a> {
+    /// Begin registering another passkey.
+    PasskeyAdd,
+    /// Revoke this exact passkey.
+    PasskeyRevoke {
+        /// Credential id of the passkey to revoke.
+        credential: &'a [u8],
+    },
+    /// Authorize this exact device signing key.
+    DeviceAuthorize {
+        /// The device's public signing key.
+        key: [u8; 32],
+    },
+}
+
+impl StepUpAction<'_> {
+    fn wire(&self) -> Value {
+        match self {
+            Self::PasskeyAdd => json!({ "kind": "passkey_add" }),
+            Self::PasskeyRevoke { credential } => {
+                json!({ "kind": "passkey_revoke", "credential": credential })
+            }
+            Self::DeviceAuthorize { key } => json!({ "kind": "device_authorize", "key": key }),
+        }
+    }
+}
+
+/// A completed step-up assertion: the ceremony `step_up_begin` returned and the
+/// credential the member's authenticator produced for it.
+#[derive(Clone, Debug)]
+pub struct StepUpProof {
+    ceremony: String,
+    credential: Value,
+}
+
+impl StepUpProof {
+    /// Pair a ceremony with the assertion produced for it; an empty ceremony or a
+    /// non-object credential is Invalid.
+    pub fn new(ceremony: String, credential: Value) -> Result<Self> {
+        if ceremony.is_empty() || !credential.is_object() {
+            return Err(Error::Invalid);
+        }
+        Ok(Self {
+            ceremony,
+            credential,
+        })
+    }
+
+    fn wire(&self) -> Value {
+        json!({ "ceremony": self.ceremony, "credential": self.credential })
     }
 }
