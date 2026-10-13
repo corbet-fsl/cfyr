@@ -9,7 +9,7 @@ mod current;
 mod record;
 pub use record::CommonRecordLease;
 mod certificate;
-pub use accounting::{AccountChallenge, AccountGrantLease};
+pub use accounting::{AccountChallenge, AccountGrantLease, StepUpAction, StepUpProof};
 mod global;
 mod global_initial;
 pub use certificate::{CertifiedMembershipLease, InitialCreationLease, RegisteredCertificateLease};

@@ -207,3 +207,43 @@ async fn held_lease_reserves_the_chosen_handle_once_and_shows_it_in_the_lobby() 
             .unwrap()
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn step_up_authorizes_exactly_the_named_device_key_through_the_held_lease() {
+    use crate::membership::{StepUpAction, StepUpProof};
+    let mut f = Fixture::new().await;
+    let key = [42u8; 32];
+    let mut lease = f
+        .foyer
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap();
+    let mut prove = async |lease: &mut crate::membership::MembershipLease<_>,
+                           action: StepUpAction<'_>| {
+        let begin = lease.step_up_begin(action, || NOW).await.unwrap();
+        let (credential, _) = f
+            .passkeys
+            .sign_in(begin["options"].clone())
+            .await
+            .unwrap()
+            .into_parts();
+        StepUpProof::new(
+            begin["ceremony"].as_str().unwrap().into(),
+            credential.into_json(),
+        )
+        .unwrap()
+    };
+    // An assertion for one key never authorizes another.
+    let proof = prove(&mut lease, StepUpAction::DeviceAuthorize { key }).await;
+    assert!(
+        lease
+            .device_authorize([43u8; 32], proof, || NOW)
+            .await
+            .is_err()
+    );
+    assert!(!lease.observation().device_keys.contains(&[43u8; 32]));
+    let proof = prove(&mut lease, StepUpAction::DeviceAuthorize { key }).await;
+    lease.device_authorize(key, proof, || NOW).await.unwrap();
+    assert!(lease.observation().device_keys.contains(&key));
+}
