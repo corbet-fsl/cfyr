@@ -1,15 +1,46 @@
 //! One retained Charter/Follower and its original tokenless Envoy transport.
 pub use cnvy::{
     Error, Result,
-    cchr::{Configuration, VerifiedCharter},
+    cchr::{ChainPin, Configuration, VerifiedCharter},
     feed::{Config, State},
 };
 use cnvy::{cchr::Charter, feed::Follower};
+
+/// Where a fingerprint-anchored community lives and what this device pinned.
+pub struct Anchor<'a> {
+    /// Exact HTTPS origin of the community feed.
+    pub origin: &'a str,
+    /// Community name the feed is signed for.
+    pub community: &'a str,
+    /// SHA-256 digest of the genesis document (the founding-key fingerprint).
+    pub fingerprint: [u8; 32],
+    /// Lowest acceptable feed revision (at least 1).
+    pub minimum_revision: u64,
+    /// Chain head this device verified before; later feeds must extend it.
+    pub pin: Option<ChainPin>,
+}
+impl Anchor<'_> {
+    fn charter(&self) -> Result<Charter> {
+        let charter = Charter::from_fingerprint(
+            self.origin.to_owned(),
+            self.community.to_owned(),
+            self.fingerprint,
+            self.minimum_revision,
+        )
+        .map_err(Error::Trust)?;
+        match self.pin {
+            Some(pin) => charter.with_pin(pin).map_err(Error::Trust),
+            None => Ok(charter),
+        }
+    }
+}
 
 /// Public trust state owned by one Foyer. It cannot be cloned, deserialized or
 /// populated by a caller-provided policy snapshot. Charter alone verifies feeds.
 pub struct Trust {
     charter: Charter,
+    /// Set for a fingerprint-anchored community; the chain is walked from genesis.
+    fingerprint: Option<[u8; 32]>,
     follower: Follower,
     #[cfg(any(
         all(feature = "http", not(target_arch = "wasm32")),
@@ -56,6 +87,7 @@ impl Trust {
     ) -> Result<Self> {
         Ok(Self {
             charter: Charter::new(configuration).map_err(Error::Trust)?,
+            fingerprint: None,
             follower: Follower::new(config)?,
             retry_entropy: config.retry_entropy,
             transport,
@@ -86,10 +118,59 @@ impl Trust {
     ) -> Result<Self> {
         Ok(Self {
             charter: Charter::new(configuration).map_err(Error::Trust)?,
+            fingerprint: None,
             follower: Follower::new(config)?,
             retry_entropy: config.retry_entropy,
             transport,
         })
+    }
+
+    /// Follow a community by its founding-key fingerprint: no key material is
+    /// configured, the feed must carry the genesis and an unbroken key chain.
+    /// A `pin` recorded by this device earlier forbids rollback and forks.
+    #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+    pub fn anchored_native(
+        anchor: &Anchor<'_>,
+        config: Config,
+        roots: &[Vec<u8>],
+    ) -> Result<Self> {
+        let transport = cnvy::http::Http::for_origin(anchor.origin, anchor.community, roots)?;
+        Self::anchored_with(anchor, config, transport)
+    }
+
+    #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+    fn anchored_with(anchor: &Anchor<'_>, config: Config, transport: cnvy::http::Http) -> Result<Self> {
+        Ok(Self {
+            charter: anchor.charter()?,
+            fingerprint: Some(anchor.fingerprint),
+            follower: Follower::new(config)?,
+            retry_entropy: config.retry_entropy,
+            transport,
+        })
+    }
+
+    /// Browser twin of [`Trust::anchored_native`].
+    #[cfg(all(feature = "browser", target_arch = "wasm32"))]
+    pub fn anchored_browser(anchor: &Anchor<'_>, config: Config) -> Result<Self> {
+        let transport = cnvy::browser::Browser::for_origin(anchor.origin, anchor.community)?;
+        Ok(Self {
+            charter: anchor.charter()?,
+            fingerprint: Some(anchor.fingerprint),
+            follower: Follower::new(config)?,
+            retry_entropy: config.retry_entropy,
+            transport,
+        })
+    }
+
+    /// The founding-key fingerprint this trust is anchored to, if any.
+    pub fn fingerprint(&self) -> Option<&[u8; 32]> {
+        self.fingerprint.as_ref()
+    }
+
+    /// The chain head of the newest verified feed, for the device to pin. It is
+    /// the verified value itself, never a hint.
+    pub fn chain_pin(&mut self, now: u64) -> Result<ChainPin> {
+        Ok(self.current(now)?.chain_pin())
     }
 
     /// Actual exclusive policy deadline is `VerifiedCharter::valid_until()`;
