@@ -175,3 +175,35 @@ async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_member_voucher(
     assert_eq!(after["member_id"], member.as_str());
     assert!(lease.submit_voucher(&code, || NOW).await.is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn held_lease_reserves_the_chosen_handle_once_and_shows_it_in_the_lobby() {
+    let f = Fixture::new().await;
+    let mut lease = f
+        .foyer
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap();
+    assert!(
+        lease
+            .handle_available("held_lease_handle", || NOW)
+            .await
+            .unwrap()
+    );
+    assert!(matches!(
+        lease.handle_available("no spaces!", || NOW).await,
+        Err(crate::Error::Invalid)
+    ));
+    let lobby = lease
+        .reserve_handle("held_lease_handle", || NOW)
+        .await
+        .unwrap();
+    assert_eq!(lobby["handle"], "held_lease_handle");
+    assert!(
+        !lease
+            .handle_available("held_lease_handle", || NOW)
+            .await
+            .unwrap()
+    );
+}

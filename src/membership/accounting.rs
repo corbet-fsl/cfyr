@@ -334,6 +334,44 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             .await
     }
 
+    /// Whether a community handle is free and well-formed. Read-only. A malformed
+    /// handle is Invalid; a taken one is `false`.
+    pub async fn handle_available(
+        &mut self,
+        handle: &str,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<bool> {
+        let answer = self
+            .forward_member(
+                "handle_available",
+                json!({ "handle": handle }),
+                false,
+                &mut clock,
+            )
+            .await?;
+        answer
+            .get("available")
+            .and_then(Value::as_bool)
+            .ok_or(Error::Reconcile)
+    }
+
+    /// Reserve the member's chosen handle through this held lease. The answer is
+    /// the lobby of exactly this member. A lost answer is Reconcile: the handle
+    /// may have been reserved, and the lobby then shows it.
+    pub async fn reserve_handle(
+        &mut self,
+        handle: &str,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        self.forward_gate(
+            "handle_reserve",
+            json!({ "handle": handle }),
+            true,
+            &mut clock,
+        )
+        .await
+    }
+
     /// Submit one member-bound voucher, given in its `cvch1.` text form, through
     /// this held lease. The server decides admission; the answer is the lobby. A
     /// lost response is Reconcile, because the voucher may have been spent.
@@ -349,6 +387,25 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
     }
 
     async fn forward_gate(
+        &mut self,
+        action: &str,
+        input: Value,
+        uncertain_after_send: bool,
+        clock: &mut impl FnMut() -> u64,
+    ) -> Result<Value> {
+        let response = self
+            .forward_member(action, input, uncertain_after_send, clock)
+            .await?;
+        // Both gate answers are the lobby of exactly this member.
+        if response.get("member_id").and_then(Value::as_str)
+            != Some(self.observation.member.as_str())
+        {
+            return Err(Error::Reconcile);
+        }
+        Ok(response)
+    }
+
+    async fn forward_member(
         &mut self,
         action: &str,
         input: Value,
@@ -383,12 +440,6 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             .map_err(|_| after_send(Error::Unavailable))?
             .map_err(after_send)?;
         self.refresh_observation(clock).await.map_err(after_send)?;
-        // Both gate answers are the lobby of exactly this member.
-        if response.get("member_id").and_then(Value::as_str)
-            != Some(self.observation.member.as_str())
-        {
-            return Err(Error::Reconcile);
-        }
         Ok(response)
     }
 }
