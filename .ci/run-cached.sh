@@ -63,8 +63,12 @@ test -f Cargo.lock || { echo 'Missing committed Cargo.lock' >&2; exit 2; }
 if ! "$CARGO_HOME/bin/rustup" target list --toolchain stable --installed 2>/dev/null | grep -qx 'wasm32-unknown-unknown'; then
   "$CARGO_HOME/bin/rustup" target add wasm32-unknown-unknown --toolchain stable
 fi
-if [ "$CHECKS" = "resolve-dependencies" ] || [ "$CHECKS" = "native" ]; then
+if [ "$CHECKS" = "resolve-dependencies" ]; then
   exec "$CCID_BIN" check --repo "$PWD" --check "$CHECKS"
+fi
+if [ "$CHECKS" = "native" ]; then
+  # The test servers link OpenSSL; run inside the pinned shell that provides it.
+  exec env NIX_BUILD_SHELL=bash nix-shell .ci/check-shell.nix --run 'exec "$CCID_BIN" check --repo "$PWD" --check native'
 fi
 "$CCID_BIN" cached --repo "$PWD" --check "$CHECKS"
 IFS=, read -r -a selected_checks <<< "$CHECKS"
