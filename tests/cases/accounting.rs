@@ -158,7 +158,7 @@ async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_voucher_link() 
         ));
     }
     // A well-formed link the server never registered is its verdict, kept plain.
-    let (unknown, _) = cvch::link::Token::generate().unwrap();
+    let (unknown, _) = cvch::link::Token::generate([5; 32]).unwrap();
     assert!(matches!(
         lease
             .submit_voucher(&unknown.fragment(), None, [1; 16], || NOW)
