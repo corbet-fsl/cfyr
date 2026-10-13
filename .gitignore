@@ -1,1 +1,11 @@
 /target
+/tests/owner/
+/dependency-metadata.json
+/owner-fixture.json
+/tests/browser/target/
+/browser-dependency-metadata.json
+/browser-native/
+/browser-native-build.json
+/browser-fixture.json*
+/.browser-tls/
+/wasm-coverage.*
