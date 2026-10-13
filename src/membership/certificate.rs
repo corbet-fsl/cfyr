@@ -158,6 +158,23 @@ impl<'p, T> CertifiedMembershipLease<'p, T> {
     pub fn expires(&self) -> Result<u64> {
         Ok(self.checked.as_ref().ok_or(Error::Unauthorized)?.expires)
     }
+    /// Borrow the same current original Charter only inside one synchronous check, with the
+    /// lease rechecked before and after. The callback cannot turn stored public evidence
+    /// into authority; it can, for example, build a passkey request or verify evidence.
+    pub fn with_current<R>(
+        &mut self,
+        mut clock: impl FnMut() -> u64,
+        inspect: impl FnOnce(&cnvy::cchr::VerifiedCharter) -> R,
+    ) -> Result<R> {
+        let now = self.check(&mut clock)?;
+        let result = self
+            .policy
+            .with_current(now, inspect)
+            .map_err(|_| Error::Unauthorized)?;
+        self.check(&mut clock)?;
+        Ok(result)
+    }
+
     /// Reborrow actual current policy and inspect the held original session
     /// synchronously after every await. Refusal consumes this check state.
     pub fn check(&mut self, mut clock: impl FnMut() -> u64) -> Result<u64> {
