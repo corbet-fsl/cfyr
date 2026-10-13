@@ -91,11 +91,29 @@ async fn lobby_voucher_and_renewal_use_real_owner_authority_until_passkey_revoca
             .credential
             .is_none()
     );
-    let wrong = voucher("alpha", "foreign-member", "foyer-voucher", NOW + 172800);
-    assert!(member.call("gate_voucher", wrong).await.is_err());
+    // A link the server never registered is refused.
+    let wrong = voucher("alpha", "foreign-member", "foyer-unknown", NOW + 172800);
+    assert!(
+        member
+            .call("voucher_redeem", wrong["redeem"].clone())
+            .await
+            .is_err()
+    );
     let valid = voucher("alpha", &lobby.member_id, "foyer-voucher", NOW + 172800);
-    member.call("gate_voucher", valid.clone()).await.unwrap();
-    assert!(member.call("gate_voucher", valid).await.is_err());
+    member
+        .call("development_voucher_link", valid["seed"].clone())
+        .await
+        .unwrap();
+    member
+        .call("voucher_redeem", valid["redeem"].clone())
+        .await
+        .unwrap();
+    assert!(
+        member
+            .call("voucher_redeem", valid["redeem"].clone())
+            .await
+            .is_err()
+    );
 
     for now in [NOW, NOW + 1] {
         service.clock.set(now);

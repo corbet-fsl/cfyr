@@ -7,6 +7,15 @@ use serde_json::{Value, json};
 /// Largest community credential accepted from the server.
 pub const MAX_COMMUNITY_CREDENTIAL_BYTES: usize = 16 * 1024;
 
+/// The lobby after presenting a voucher link, and the bond secret both devices
+/// derive. The bond belongs in vault custody; it is only usable once admitted.
+pub struct VoucherRedeemed {
+    /// The member's own lobby.
+    pub lobby: Value,
+    /// Bond secret shared with the issuer's device.
+    pub bond: cvch::link::Bond,
+}
+
 /// One original server challenge retained with its exact HTTPS/member owner.
 /// The wallet must authenticate `signed_request` using its current Charter and
 /// use the original global passport owner. This is not a passport or admission.
@@ -372,18 +381,44 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         .await
     }
 
-    /// Submit one member-bound voucher, given in its `cvch1.` text form, through
-    /// this held lease. The server decides admission; the answer is the lobby. A
-    /// lost response is Reconcile, because the voucher may have been spent.
+    /// Present one voucher link, given as the text after `#` in its URL, through
+    /// this held lease. `nonce` is this device's bond contribution; keep it with
+    /// the pending join and pass the same value on every retry, because the
+    /// issuer's device derives the bond from the first notice it receives. The
+    /// notice is sealed to the issuer's device here; the server relays it opaque.
+    /// The server decides admission (a link with sign-off keeps the member in the
+    /// lobby until the issuer confirms); the answer is the lobby. A lost response
+    /// is Reconcile, because the link may have been used.
     pub async fn submit_voucher(
         &mut self,
-        code: &str,
+        link: &str,
+        community: &str,
+        handle: Option<&str>,
+        nonce: [u8; cvch::link::NONCE_BYTES],
         mut clock: impl FnMut() -> u64,
-    ) -> Result<Value> {
-        let voucher = cvch::Voucher::from_code(code.trim()).map_err(|_| Error::Invalid)?;
-        let voucher = serde_json::to_value(&voucher).map_err(|_| Error::Invalid)?;
-        self.forward_gate("gate_voucher", voucher, true, &mut clock)
-            .await
+    ) -> Result<VoucherRedeemed> {
+        let token = cvch::link::Token::parse(link.trim().trim_start_matches('#'))
+            .map_err(|_| Error::Invalid)?;
+        let member = self.observation.member.clone();
+        let notice = cvch::link::Notice {
+            member: member.clone(),
+            nonce,
+            handle: handle.map(str::to_owned),
+        };
+        let request =
+            cvch::link::Request::new(&token, community, &notice).map_err(|_| Error::Invalid)?;
+        let lobby = self
+            .forward_gate(
+                "voucher_redeem",
+                json!({"id": request.id, "secret": request.secret, "notice": request.notice}),
+                true,
+                &mut clock,
+            )
+            .await?;
+        Ok(VoucherRedeemed {
+            lobby,
+            bond: token.bond(community, &member, &nonce),
+        })
     }
 
     /// Begin a fresh user-verifying passkey assertion for exactly one account
