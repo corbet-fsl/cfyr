@@ -490,6 +490,31 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         Ok(response)
     }
 
+    /// Pairing, existing device's session: approve the new device's pending key with a
+    /// step-up for exactly that key, after the lineage revision containing it is published.
+    /// The key stays pending (not live) until the new device confirms; the answer must not
+    /// list it yet. A lost answer is Reconcile.
+    pub async fn device_approve(
+        &mut self,
+        key: [u8; 32],
+        step_up: StepUpProof,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        self.take_step_up(&StepUpAction::DeviceApprove { key }, &step_up, clock())?;
+        let response = self
+            .forward_member(
+                "device_approve",
+                json!({ "key": key, "step_up": step_up.wire() }),
+                true,
+                &mut clock,
+            )
+            .await?;
+        if lists(&response, &key) || self.observation.device_keys.contains(&key) {
+            return Err(Error::Reconcile);
+        }
+        Ok(response)
+    }
+
     /// Pairing: make this session's pending key live, after its lineage revision is
     /// published. The answer and the refreshed observation must list it. A lost answer is
     /// Reconcile (the confirmation may have happened).
@@ -704,6 +729,11 @@ pub enum StepUpAction<'a> {
         /// The device's public signing key.
         key: [u8; 32],
     },
+    /// Approve this pending device signing key from the existing device's passkey.
+    DeviceApprove {
+        /// The device's public signing key.
+        key: [u8; 32],
+    },
     /// Remove this exact device signing key, live or pending.
     DeviceRevoke {
         /// The device's public signing key.
@@ -719,6 +749,7 @@ impl StepUpAction<'_> {
                 json!({ "kind": "passkey_revoke", "credential": credential })
             }
             Self::DeviceAuthorize { key } => json!({ "kind": "device_authorize", "key": key }),
+            Self::DeviceApprove { key } => json!({ "kind": "device_approve", "key": key }),
             Self::DeviceRevoke { key } => json!({ "kind": "device_revoke", "key": key }),
         }
     }

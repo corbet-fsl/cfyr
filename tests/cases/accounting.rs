@@ -315,7 +315,7 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_paired_device_key_is_pending_until_confirmed_and_revocable_with_its_own_step_up() {
+async fn a_paired_device_key_stays_pending_without_another_passkeys_approval_and_is_revocable() {
     use crate::membership::{StepUpAction, StepUpProof};
     let mut f = Fixture::new().await;
     let key = [44u8; 32];
@@ -340,17 +340,19 @@ async fn a_paired_device_key_is_pending_until_confirmed_and_revocable_with_its_o
         )
         .unwrap()
     };
-    // Pending: accepted, but the key is not live and a revoke proof does not open it.
+    // Pending: accepted, but the key is not live, a revoke proof does not open it, and the
+    // same passkey can neither confirm nor approve its own key.
     let proof = prove(&mut lease, StepUpAction::DeviceAuthorize { key }).await;
     lease.device_pair_authorize(key, proof, || NOW).await.unwrap();
     assert!(!lease.observation().device_keys.contains(&key));
     let wrong = prove(&mut lease, StepUpAction::DeviceAuthorize { key }).await;
     assert!(lease.device_revoke(key, wrong, || NOW).await.is_err());
-    // Confirmed: live.
-    lease.device_confirm(key, || NOW).await.unwrap();
-    assert!(lease.observation().device_keys.contains(&key));
-    // Revoked with its own step-up: gone.
+    assert!(lease.device_confirm(key, || NOW).await.is_err());
+    let own = prove(&mut lease, StepUpAction::DeviceApprove { key }).await;
+    assert!(lease.device_approve(key, own, || NOW).await.is_err());
+    assert!(!lease.observation().device_keys.contains(&key));
+    // Its own revoke step-up removes the pending key.
     let proof = prove(&mut lease, StepUpAction::DeviceRevoke { key }).await;
     lease.device_revoke(key, proof, || NOW).await.unwrap();
-    assert!(!lease.observation().device_keys.contains(&key));
+    assert!(lease.device_confirm(key, || NOW).await.is_err());
 }
