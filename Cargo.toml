@@ -18,16 +18,16 @@ ohttp = ["cvld/client-ohttp"]
 
 [dependencies]
 cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["client"] }
-cnvy = { git = "https://git.corbet.ch/corbet-foss/cnvy.git", branch = "v01", default-features = false }
+cnvy = { git = "https://git.corbet.ch/corbet-foss/cnvy.git", branch = "main", default-features = false }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 futures = "0.3"
-cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "v01" }
+cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "main" }
 cvch = { git = "https://git.corbet.ch/corbet-foss/cvch", branch = "main" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 url = "2"
-cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "v01", features = ["test-authenticator"] }
+cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "main", features = ["test-authenticator"] }
 cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["development-gate", "client-http"] }
 cmty = { git = "https://git.corbet.ch/corbet-libs/cmty", branch = "main" }
 cpsd = { git = "https://git.corbet.ch/corbet-foss/cpsd", branch = "main", default-features = false, features = ["storage"] }
