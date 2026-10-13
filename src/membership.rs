@@ -125,6 +125,8 @@ pub struct MembershipLease<T> {
     scope: ObservationScope,
     credential: Option<Vec<u8>>,
     checked_at: Option<u64>,
+    step_up: Option<accounting::PendingStepUp>,
+    adding: Option<String>,
     _pending: Pending<T>,
 }
 
@@ -258,6 +260,8 @@ impl<T: Transport> LiveMembership<T> {
                     scope: self.1,
                     credential: observed.credential,
                     checked_at: Some(observed.checked_at),
+                    step_up: None,
+                    adding: None,
                     _pending: pending,
                 })
             },

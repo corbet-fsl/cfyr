@@ -396,13 +396,45 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         action: StepUpAction<'_>,
         mut clock: impl FnMut() -> u64,
     ) -> Result<Value> {
-        self.forward_member(
-            "step_up_begin",
-            json!({ "action": action.wire() }),
-            false,
-            &mut clock,
-        )
-        .await
+        let wire = action.wire();
+        let begun = clock();
+        let answer = self
+            .forward_member(
+                "step_up_begin",
+                json!({ "action": wire.clone() }),
+                false,
+                &mut clock,
+            )
+            .await?;
+        // One outstanding step-up per lease: a new begin replaces the old one.
+        self.step_up = answer
+            .get("ceremony")
+            .and_then(Value::as_str)
+            .map(|ceremony| PendingStepUp {
+                ceremony: ceremony.into(),
+                action: wire,
+                begun,
+            });
+        Ok(answer)
+    }
+
+    /// Consume the lease's single outstanding step-up: it must be the one this
+    /// proof answers, begun on this lease for exactly this action, and fresh.
+    fn take_step_up(
+        &mut self,
+        action: &StepUpAction<'_>,
+        proof: &StepUpProof,
+        now: u64,
+    ) -> Result<()> {
+        let pending = self.step_up.take().ok_or(Error::Unauthorized)?;
+        if pending.ceremony != proof.ceremony
+            || pending.action != action.wire()
+            || now < pending.begun
+            || now - pending.begun > STEP_UP_FRESH_SECONDS
+        {
+            return Err(Error::Unauthorized);
+        }
+        Ok(())
     }
 
     /// Bind one lineage device key to this account with a completed step-up
@@ -415,6 +447,7 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         step_up: StepUpProof,
         mut clock: impl FnMut() -> u64,
     ) -> Result<Value> {
+        self.take_step_up(&StepUpAction::DeviceAuthorize { key }, &step_up, clock())?;
         let response = self
             .forward_member(
                 "device_authorize",
@@ -440,13 +473,23 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         step_up: StepUpProof,
         mut clock: impl FnMut() -> u64,
     ) -> Result<Value> {
-        self.forward_member(
-            "passkey_add",
-            json!({ "step": "begin", "step_up": step_up.wire() }),
-            false,
-            &mut clock,
-        )
-        .await
+        self.take_step_up(&StepUpAction::PasskeyAdd, &step_up, clock())?;
+        self.adding = None;
+        let answer = self
+            .forward_member(
+                "passkey_add",
+                json!({ "step": "begin", "step_up": step_up.wire() }),
+                false,
+                &mut clock,
+            )
+            .await?;
+        // Exactly a registration challenge, never another step's answer.
+        let ceremony = (answer.get("step").and_then(Value::as_str) == Some("challenge"))
+            .then(|| answer.get("ceremony").and_then(Value::as_str))
+            .flatten()
+            .ok_or(Error::Reconcile)?;
+        self.adding = Some(ceremony.into());
+        Ok(answer)
     }
 
     /// Second half: the new passkey's registration. A lost answer is Reconcile.
@@ -456,13 +499,27 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         credential: Value,
         mut clock: impl FnMut() -> u64,
     ) -> Result<Value> {
-        self.forward_member(
-            "passkey_add",
-            json!({ "step": "finish", "ceremony": ceremony, "credential": credential }),
-            true,
-            &mut clock,
-        )
-        .await
+        if self.adding.as_deref() != Some(ceremony) {
+            return Err(Error::Unauthorized);
+        }
+        self.adding = None;
+        let answer = self
+            .forward_member(
+                "passkey_add",
+                json!({ "step": "finish", "ceremony": ceremony, "credential": credential }),
+                true,
+                &mut clock,
+            )
+            .await?;
+        let registered = answer.get("step").and_then(Value::as_str) == Some("registered")
+            && answer
+                .get("credential")
+                .and_then(Value::as_array)
+                .is_some_and(|id| !id.is_empty());
+        if !registered {
+            return Err(Error::Reconcile);
+        }
+        Ok(answer)
     }
 
     /// Revoke one passkey of this account with a step-up assertion for exactly
@@ -473,13 +530,24 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         step_up: StepUpProof,
         mut clock: impl FnMut() -> u64,
     ) -> Result<Value> {
-        self.forward_member(
-            "passkey_revoke",
-            json!({ "credential": credential, "step_up": step_up.wire() }),
-            true,
-            &mut clock,
-        )
-        .await
+        self.take_step_up(
+            &StepUpAction::PasskeyRevoke { credential },
+            &step_up,
+            clock(),
+        )?;
+        let answer = self
+            .forward_member(
+                "passkey_revoke",
+                json!({ "credential": credential, "step_up": step_up.wire() }),
+                true,
+                &mut clock,
+            )
+            .await?;
+        // The server answers Empty; anything else is not this action's answer.
+        if answer.as_object().is_none_or(|fields| !fields.is_empty()) {
+            return Err(Error::Reconcile);
+        }
+        Ok(answer)
     }
 
     async fn forward_gate(
@@ -538,6 +606,15 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         self.refresh_observation(clock).await.map_err(after_send)?;
         Ok(response)
     }
+}
+
+const STEP_UP_FRESH_SECONDS: u64 = 120;
+
+/// The step-up this lease began and has not yet spent.
+pub(crate) struct PendingStepUp {
+    ceremony: String,
+    action: Value,
+    begun: u64,
 }
 
 /// The one account-authority action a step-up assertion authorizes.

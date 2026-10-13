@@ -247,3 +247,69 @@ async fn step_up_authorizes_exactly_the_named_device_key_through_the_held_lease(
     lease.device_authorize(key, proof, || NOW).await.unwrap();
     assert!(lease.observation().device_keys.contains(&key));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exact_answers() {
+    use crate::membership::{StepUpAction, StepUpProof};
+    let mut f = Fixture::new().await;
+    let mut lease = f
+        .foyer
+        .live_membership()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap();
+    let mut prove = async |lease: &mut crate::membership::MembershipLease<_>,
+                           action: StepUpAction<'_>| {
+        let begin = lease.step_up_begin(action, || NOW).await.unwrap();
+        let (credential, _) = f
+            .passkeys
+            .sign_in(begin["options"].clone())
+            .await
+            .unwrap()
+            .into_parts();
+        StepUpProof::new(
+            begin["ceremony"].as_str().unwrap().into(),
+            credential.into_json(),
+        )
+        .unwrap()
+    };
+    // A step-up for another action never opens passkey_add, and is spent by the try.
+    let wrong = prove(&mut lease, StepUpAction::DeviceAuthorize { key: [9u8; 32] }).await;
+    assert!(lease.passkey_add_begin(wrong, || NOW).await.is_err());
+    // A step-up older than the freshness window is refused.
+    let stale = prove(&mut lease, StepUpAction::PasskeyAdd).await;
+    assert!(lease.passkey_add_begin(stale, || NOW + 10_000).await.is_err());
+    // A proof is single use.
+    let proof = prove(&mut lease, StepUpAction::PasskeyAdd).await;
+    let begin = lease.passkey_add_begin(proof.clone(), || NOW).await.unwrap();
+    assert_eq!(begin["step"], "challenge");
+    assert!(lease.passkey_add_begin(proof, || NOW).await.is_err());
+    // Finish only for the ceremony this lease began.
+    let proof = prove(&mut lease, StepUpAction::PasskeyAdd).await;
+    let begin = lease.passkey_add_begin(proof, || NOW).await.unwrap();
+    let (credential, _) = f
+        .passkeys
+        .register_member(begin["options"].clone())
+        .await
+        .unwrap()
+        .into_parts();
+    let credential = credential.into_json();
+    assert!(
+        lease
+            .passkey_add_finish("some-other-ceremony", credential.clone(), || NOW)
+            .await
+            .is_err()
+    );
+    let added = lease
+        .passkey_add_finish(begin["ceremony"].as_str().unwrap(), credential, || NOW)
+        .await
+        .unwrap();
+    assert_eq!(added["step"], "registered");
+    let id: Vec<u8> = serde_json::from_value(added["credential"].clone()).unwrap();
+    // Revoke: a step-up for the add action never opens revoke; its own proof does, once.
+    let wrong = prove(&mut lease, StepUpAction::PasskeyAdd).await;
+    assert!(lease.passkey_revoke(&id, wrong, || NOW).await.is_err());
+    let proof = prove(&mut lease, StepUpAction::PasskeyRevoke { credential: &id }).await;
+    lease.passkey_revoke(&id, proof.clone(), || NOW).await.unwrap();
+    assert!(lease.passkey_revoke(&id, proof, || NOW).await.is_err());
+}
