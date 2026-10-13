@@ -15,9 +15,10 @@ if not re.fullmatch(r'git\+https://git\.corbet\.ch/corbet-libs/cvld\?branch=main
 source = Path(owner['manifest_path']).parent.resolve()
 destination = Path('tests/owner')
 destination.mkdir(parents=True, exist_ok=True)
-names = ['mod.rs', 'resident.rs']
-if (source / 'tests/support/client_faults.rs').is_file():
-    names.append('client_faults.rs')
+# Copy every module the owner's support fixture declares, so new owner modules follow automatically.
+names = sorted(path.name for path in (source / 'tests/support').glob('*.rs'))
+if 'mod.rs' not in names:
+    raise SystemExit('Owner fixture has no tests/support/mod.rs')
 for name in names:
     fixture = (source / 'tests/support' / name).resolve()
     if not fixture.is_relative_to(source):
