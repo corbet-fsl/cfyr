@@ -35,6 +35,8 @@ pub mod policy;
 pub mod registration;
 /// Opaque correlation with one original successful session installation.
 pub mod session;
+/// Passkey-free community sessions opened by the device key's signed nonce.
+pub mod device_session;
 
 /// Step-up proofs for the tests' guarded calls.
 #[cfg(test)]
@@ -119,6 +121,15 @@ impl<T: SessionTransport> Foyer<T> {
         request: Value,
         original_id: Option<Vec<u8>>,
     ) -> Result<SessionInfo> {
+        self.install(request, original_id, false).await
+    }
+
+    pub(crate) async fn install(
+        &mut self,
+        request: Value,
+        original_id: Option<Vec<u8>>,
+        device: bool,
+    ) -> Result<SessionInfo> {
         let mut retained = self.shared.session.lock().await;
         // Invalidate earlier stamps before the mutation can be sent. Identical
         // public SessionInfo values do not identify the same server session.
@@ -128,7 +139,11 @@ impl<T: SessionTransport> Foyer<T> {
             .authentication
             .checked_add(1)
             .ok_or(Error::Unavailable)?;
-        let info = retained.client.authenticate(request).await?;
+        let info = if device {
+            retained.client.authenticate_device(request).await?
+        } else {
+            retained.client.authenticate(request).await?
+        };
         retained.info = Some(info.clone());
         retained.login_credential = original_id;
         Ok(info)
