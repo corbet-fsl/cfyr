@@ -34,6 +34,8 @@ cpsd = { git = "https://git.corbet.ch/corbet-foss/cpsd", branch = "main", defaul
 csgn = { git = "https://git.corbet.ch/corbet-foss/csgn", branch = "main", features = ["libsql"] }
 cgbl = { git = "https://git.corbet.ch/corbet-libs/cgbl.git", branch = "main" }
 ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main" }
+crgs = { git = "https://git.corbet.ch/corbet-foss/crgs", branch = "main" }
+crlt = { git = "https://git.corbet.ch/corbet-foss/crlt", branch = "main" }
 cpns = { git = "https://git.corbet.ch/corbet-foss/cpns", branch = "main" }
 ed25519-dalek = { version = "2.2" }
 axum = { version = "0.8.9" }
