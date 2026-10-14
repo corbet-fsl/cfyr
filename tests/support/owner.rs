@@ -3,6 +3,8 @@
 #[path = "../owner/mod.rs"]
 mod original;
 pub use original::*;
+#[path = "../owner/client_faults.rs"]
+pub mod client_faults;
 
 use cvld::api::Ceremony;
 use serde_json::{Value, json};

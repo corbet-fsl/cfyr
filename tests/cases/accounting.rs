@@ -24,7 +24,7 @@ async fn actual_signed_account_challenge_binds_current_origin_and_refuses_forged
                     current.key_ring().clone(),
                 );
                 let request = anchor.authenticate(signed, checked).unwrap();
-                assert_eq!(request.community().as_str(), "alpha");
+                assert_eq!(request.community().as_bytes(), b"alpha");
                 assert!(request.policy_epoch() > 0);
                 assert!(request.epoch_expiry().is_some());
             },
@@ -168,7 +168,7 @@ async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_voucher_link() 
     // A registered link is accepted and answers that member's lobby; the second
     // submission by the same member is spent and refused.
     let own = voucher("alpha", &member, "held-lease-own", NOW + 172800);
-    f.registered
+    f.foyer
         .call("development_voucher_link", own["seed"].clone())
         .await
         .unwrap();
@@ -269,10 +269,10 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
         .await
         .unwrap();
     let mut prove = async |lease: &mut crate::membership::MembershipLease<_>,
+                           passkeys: &mut cpky::Client<cpky::software::SoftwareAuthenticator>,
                            action: StepUpAction<'_>| {
         let begin = lease.step_up_begin(action, || NOW).await.unwrap();
-        let (credential, _) = f
-            .passkeys
+        let (credential, _) = passkeys
             .sign_in(begin["options"].clone())
             .await
             .unwrap()
@@ -284,10 +284,10 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
         .unwrap()
     };
     // A step-up for another action never opens passkey_add, and is spent by the try.
-    let wrong = prove(&mut lease, StepUpAction::DeviceAuthorize { key: [9u8; 32] }).await;
+    let wrong = prove(&mut lease, &mut f.passkeys, StepUpAction::DeviceAuthorize { key: [9u8; 32] }).await;
     assert!(lease.passkey_add_begin(wrong, || NOW).await.is_err());
     // A step-up older than the freshness window is refused.
-    let stale = prove(&mut lease, StepUpAction::PasskeyAdd).await;
+    let stale = prove(&mut lease, &mut f.passkeys, StepUpAction::PasskeyAdd).await;
     assert!(
         lease
             .passkey_add_begin(stale, || NOW + 10_000)
@@ -295,7 +295,7 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
             .is_err()
     );
     // A proof is single use.
-    let proof = prove(&mut lease, StepUpAction::PasskeyAdd).await;
+    let proof = prove(&mut lease, &mut f.passkeys, StepUpAction::PasskeyAdd).await;
     let begin = lease
         .passkey_add_begin(proof.clone(), || NOW)
         .await
@@ -303,7 +303,7 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
     assert_eq!(begin["step"], "challenge");
     assert!(lease.passkey_add_begin(proof, || NOW).await.is_err());
     // Finish only for the ceremony this lease began.
-    let proof = prove(&mut lease, StepUpAction::PasskeyAdd).await;
+    let proof = prove(&mut lease, &mut f.passkeys, StepUpAction::PasskeyAdd).await;
     let begin = lease.passkey_add_begin(proof, || NOW).await.unwrap();
     let (credential, _) = f
         .passkeys
@@ -325,9 +325,9 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
     assert_eq!(added["step"], "registered");
     let id: Vec<u8> = serde_json::from_value(added["credential"].clone()).unwrap();
     // Revoke: a step-up for the add action never opens revoke; its own proof does, once.
-    let wrong = prove(&mut lease, StepUpAction::PasskeyAdd).await;
+    let wrong = prove(&mut lease, &mut f.passkeys, StepUpAction::PasskeyAdd).await;
     assert!(lease.passkey_revoke(&id, wrong, || NOW).await.is_err());
-    let proof = prove(&mut lease, StepUpAction::PasskeyRevoke { credential: &id }).await;
+    let proof = prove(&mut lease, &mut f.passkeys, StepUpAction::PasskeyRevoke { credential: &id }).await;
     lease
         .passkey_revoke(&id, proof.clone(), || NOW)
         .await
