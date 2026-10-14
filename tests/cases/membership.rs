@@ -76,10 +76,7 @@ async fn registered_session(service: &Running, passport: &cpsd::Passport) -> Reg
     let device = ed25519_dalek::SigningKey::from_bytes(&[53; 32])
         .verifying_key()
         .to_bytes();
-    foyer
-        .call("device_authorize", json!({"key":device}))
-        .await
-        .unwrap();
+    authorize_device_with_step_up(&mut foyer, &mut passkeys, device).await;
     RegisteredCommunity {
         foyer,
         registered: continued,
@@ -87,6 +84,35 @@ async fn registered_session(service: &Running, passport: &cpsd::Passport) -> Reg
         info,
         device,
     }
+}
+
+
+/// Authorize a device key as a real member does: `step_up_begin` for exactly this action, the passkey assertion for
+/// that ceremony, then the action with the proof (cvld requires a fresh step-up for every device action).
+async fn authorize_device_with_step_up(
+    foyer: &mut Foyer<crate::HttpClient>,
+    passkeys: &mut cpky::Client<cpky::software::SoftwareAuthenticator>,
+    key: [u8; 32],
+) {
+    let begin = foyer
+        .call(
+            "step_up_begin",
+            json!({"action": {"kind": "device_authorize", "key": key}}),
+        )
+        .await
+        .unwrap();
+    let (credential, _) = passkeys
+        .sign_in(begin["options"].clone())
+        .await
+        .unwrap()
+        .into_parts();
+    foyer
+        .call(
+            "device_authorize",
+            json!({"key": key, "step_up": {"ceremony": begin["ceremony"], "credential": credential.into_json()}}),
+        )
+        .await
+        .unwrap();
 }
 
 async fn login_registered(

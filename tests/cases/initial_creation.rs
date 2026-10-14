@@ -338,10 +338,8 @@ async fn held_refresh_observes_actual_new_device_without_renewing_identity_or_de
         .verifying_key()
         .to_bytes();
     assert!(!initial.observation().unwrap().device_keys.contains(&key));
-    other
-        .call("device_authorize", json!({"key":key}))
-        .await
-        .unwrap();
+    let mut other = other;
+    authorize_device_with_step_up(&mut other, &mut keys, key).await;
     assert_eq!(initial.refresh(|| NOW + 1).await.unwrap(), NOW + 1);
     assert!(initial.observation().unwrap().device_keys.contains(&key));
     assert_eq!(initial.observation().unwrap().member, member);

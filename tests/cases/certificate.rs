@@ -109,7 +109,7 @@ impl TlsIngress {
                                 | "/v1/login_discoverable_begin" | "/v1/login_finish" | "/v1/logout"
                                 | "/v1/lobby" | "/v1/device_keys" | "/v1/device_authorize"
                                 | "/v1/trust_feed" | "/v1/trust_changes" | "/v1/passkey_certificate"
-                                | "/v1/passkey_add" | "/v1/passkey_revoke"
+                                | "/v1/passkey_add" | "/v1/passkey_revoke" | "/v1/step_up_begin"
                                 | "/v1/initial_registration_begin" | "/v1/initial_creation"
                                 | "/v1/initial_publication_bind" | "/v1/presentation_challenge"
                                 | "/v1/account_credential_issue"));
@@ -197,6 +197,35 @@ async fn trust(service: &Running, tls: &TlsIngress) -> crate::trust::Trust {
     trust.start(|| NOW).await.unwrap();
     trust
 }
+
+/// Authorize a device key as a real member does: `step_up_begin` for exactly this action, the passkey assertion for
+/// that ceremony, then the action with the proof (cvld requires a fresh step-up for every device action).
+async fn authorize_device_with_step_up(
+    foyer: &mut Foyer<crate::HttpClient>,
+    passkeys: &mut cpky::Client<SoftwareAuthenticator>,
+    key: [u8; 32],
+) {
+    let begin = foyer
+        .call(
+            "step_up_begin",
+            json!({"action": {"kind": "device_authorize", "key": key}}),
+        )
+        .await
+        .unwrap();
+    let (credential, _) = passkeys
+        .sign_in(begin["options"].clone())
+        .await
+        .unwrap()
+        .into_parts();
+    foyer
+        .call(
+            "device_authorize",
+            json!({"key": key, "step_up": {"ceremony": begin["ceremony"], "credential": credential.into_json()}}),
+        )
+        .await
+        .unwrap();
+}
+
 fn passkeys() -> cpky::Client<SoftwareAuthenticator> {
     cpky::Client::new(
         Context::new(VAULT, "alpha.example.test").unwrap(),
@@ -311,10 +340,7 @@ impl Fixture {
         let device = ed25519_dalek::SigningKey::from_bytes(&[53; 32])
             .verifying_key()
             .to_bytes();
-        foyer
-            .call("device_authorize", json!({"key": device}))
-            .await
-            .unwrap();
+        authorize_device_with_step_up(&mut foyer, &mut keys, device).await;
         Self {
             tls,
             service,
