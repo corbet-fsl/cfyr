@@ -7856,7 +7856,7 @@ name = "ctrn"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -7876,7 +7876,7 @@ name = "cfry"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -7884,7 +7884,7 @@ name = "cnvl"
 version = "0.0.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -7896,7 +7896,7 @@ name = "cdlv"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -7920,7 +7920,7 @@ name = "clkp"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -7936,7 +7936,7 @@ name = "cthr"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -7988,7 +7988,7 @@ name = "cprz-video"
 version = "0.0.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -8004,11 +8004,11 @@ name = "cgth"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -8016,7 +8016,7 @@ name = "clnk"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -8024,7 +8024,7 @@ name = "cfyr-browser-tests"
 version = "0.0.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -8048,7 +8048,7 @@ name = "ctcs"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]
@@ -8056,7 +8056,7 @@ name = "cwst"
 version = "0.0.0"
 
 [[patch.unused]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 
 [[patch.unused]]

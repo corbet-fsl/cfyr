@@ -16,7 +16,7 @@ cfyr = { path = "../..", default-features = false, features = ["browser"] }
 gloo-net = { version = "0.7", default-features = false, features = ["http", "json"] }
 serde_json = "1"
 wasm-bindgen-test = "0.3.79"
-browser-coverage-runtime = { path = "../../.github/coverage-runtime" }
+browser-coverage-runtime = { package = "browser-coverage-runtime-cfyr", path = "../../.github/coverage-runtime" }
 
 [[test]]
 name = "browser_client"

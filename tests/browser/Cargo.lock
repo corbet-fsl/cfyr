@@ -262,7 +262,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "browser-coverage-runtime"
+name = "browser-coverage-runtime-cfyr"
 version = "0.0.0"
 dependencies = [
  "minicov 0.3.9",
@@ -359,7 +359,7 @@ dependencies = [
 name = "cfyr-browser-tests"
 version = "0.0.0"
 dependencies = [
- "browser-coverage-runtime",
+ "browser-coverage-runtime-cfyr",
  "cfyr",
  "gloo-net",
  "serde_json",
