@@ -397,7 +397,9 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
     /// this held lease. `nonce` is this device's bond contribution; keep it with
     /// the pending join and pass the same value on every retry, because the
     /// issuer's device derives the bond from the first notice it receives. The
-    /// notice is sealed to the issuer's device here; the server relays it opaque.
+    /// `key_package` is the newcomer device's single-use Threads key package
+    /// (empty when none is offered); it travels only inside the sealed notice.
+    /// The notice is sealed to the issuer's device here; the server relays it opaque.
     /// The server decides admission (a link with sign-off keeps the member in the
     /// lobby until the issuer confirms); the answer is the lobby. A lost response
     /// is Reconcile, because the link may have been used.
@@ -406,6 +408,7 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         link: &str,
         handle: Option<&str>,
         nonce: [u8; cvch::link::NONCE_BYTES],
+        key_package: &[u8],
         mut clock: impl FnMut() -> u64,
     ) -> Result<VoucherRedeemed> {
         let token = cvch::link::Token::parse(link.trim().trim_start_matches('#'))
@@ -415,6 +418,7 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             member: member.clone(),
             nonce,
             handle: handle.map(str::to_owned),
+            key_package: key_package.to_vec(),
         };
         let request = cvch::link::Request::new(&token, &notice).map_err(|_| Error::Invalid)?;
         let lobby = self
