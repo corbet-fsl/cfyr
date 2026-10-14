@@ -3,13 +3,7 @@ project = "cfyr"
 
 [checks.rust]
 kind = "commands"
-commands = [
-  ["rustc", "--version"],
-  ["cargo", "fmt", "--all", "--check"],
-  ["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"],
-  ["cargo", "test", "--locked"],
-  ["cargo", "check", "--locked", "--target", "wasm32-unknown-unknown"],
-]
+commands = [["bash", ".ci/verify.sh"]]
 cache_tools = [["rustc", "-vV"], ["cargo", "--version"]]
 
 [render]
