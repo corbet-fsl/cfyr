@@ -25,7 +25,7 @@ use tokio_rustls::{
 const HOST: &str = WALLET;
 const COMMUNITY: &str = "api.alpha.example.test";
 // Exact original global Passkeys RP origin; the wallet has its own realm.
-const VAULT: &str = "https://wallet.example.test";
+const VAULT: &str = "https://vault.wallet.example.test";
 
 #[derive(Default)]
 struct Gate {
@@ -123,11 +123,14 @@ impl Fixture {
         self.foyer.live_global_wallet(self.tls.origin.clone())
     }
     async fn add_key(&mut self) -> (cpky::Client<SoftwareAuthenticator>, Vec<u8>) {
-        let begin = self
-            .foyer
-            .call("passkey_add", json!({"step":"begin"}))
-            .await
-            .unwrap();
+        let body = crate::test_step_up::proven(
+            &mut self.foyer,
+            &mut self.keys,
+            json!({"kind":"passkey_add"}),
+            json!({"step":"begin"}),
+        )
+        .await;
+        let begin = self.foyer.call("passkey_add", body).await.unwrap();
         let mut added = passkeys();
         let (public, custody) = added
             .register_member(begin["options"].clone())
@@ -238,10 +241,14 @@ async fn fresh_original_server_revocation_and_wrong_runtime_origin_refuse() {
     let (mut added, _) = f.add_key().await;
     let mut other = foyer(&f.tls);
     login(&mut other, &mut added).await;
-    other
-        .call("passkey_revoke", json!({"credential":f.original_id}))
-        .await
-        .unwrap();
+    let body = crate::test_step_up::proven(
+        &mut other,
+        &mut added,
+        json!({"kind":"passkey_revoke","credential":f.original_id}),
+        json!({"credential":f.original_id}),
+    )
+    .await;
+    other.call("passkey_revoke", body).await.unwrap();
     assert!(f.live().observe_lease(|| NOW).await.is_err());
 }
 
@@ -411,7 +418,7 @@ impl TlsIngress {
                             assert!(matches!(path.as_str(), "/v1/register_begin" | "/v1/register_finish"
                                 | "/v1/login_discoverable_begin" | "/v1/login_finish" | "/v1/logout"
                                 | "/v1/global_public" | "/v1/passkey_list"
-                                | "/v1/passkey_add" | "/v1/passkey_revoke"
+                                | "/v1/passkey_add" | "/v1/passkey_revoke" | "/v1/step_up_begin"
                                 | "/v1/global_initial_registration_continue" | "/v1/initial_creation"
                                 | "/v1/initial_publication_bind" | "/v1/global_self_ban_begin"
                                 | "/v1/global_self_ban_finish" | "/v1/wallet_trust_feed"

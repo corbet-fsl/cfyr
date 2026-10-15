@@ -173,10 +173,14 @@ impl WalletFixture {
             .await
             .unwrap();
         assert_eq!(login(&mut foyer, &mut keys).await, id);
-        foyer
-            .call("wallet_device_authorize", json!({"key":DEVICE}))
-            .await
-            .unwrap();
+        let body = crate::test_step_up::proven(
+            &mut foyer,
+            &mut keys,
+            json!({"kind":"device_authorize","key":DEVICE}),
+            json!({"key":DEVICE}),
+        )
+        .await;
+        foyer.call("wallet_device_authorize", body).await.unwrap();
         // Authorizing the device changed the actual signed publication. The
         // same original Follower refreshes it before certificate composition.
         {
@@ -341,11 +345,14 @@ async fn another_current_policy_or_same_account_noncurrent_key_cannot_join_the_w
             .is_err()
     );
 
-    let begin = f
-        .foyer
-        .call("passkey_add", json!({"step":"begin"}))
-        .await
-        .unwrap();
+    let body = crate::test_step_up::proven(
+        &mut f.foyer,
+        &mut f.keys,
+        json!({"kind":"passkey_add"}),
+        json!({"step":"begin"}),
+    )
+    .await;
+    let begin = f.foyer.call("passkey_add", body).await.unwrap();
     let mut added = passkeys();
     let (public, prf) = added
         .register_member(begin["options"].clone())

@@ -5,6 +5,7 @@ use super::*;
 mod owner;
 use owner::*;
 use serde_json::json;
+use webauthn_authenticator_rs::AuthenticatorBackend as _;
 
 async fn authenticated(
     service: &Running,
@@ -292,10 +293,26 @@ async fn original_session_roster_uses_real_pseudonym_and_refuses_after_passkey_r
     assert_ne!(actual.member, info.user);
     assert_eq!(actual.device_keys, vec![member.signing_key]);
     assert_eq!(actual.expires, info.expires);
-    foyer
-        .call("passkey_revoke", json!({"credential":member.credential}))
-        .await
+    let begin = crate::test_step_up::begin(
+        &mut foyer,
+        json!({"kind":"passkey_revoke","credential":member.credential}),
+    )
+    .await;
+    let challenge: ckyh::RequestChallengeResponse =
+        serde_json::from_value(begin["options"].clone()).unwrap();
+    let credential = member
+        .authenticator
+        .perform_auth(
+            ckyh::Url::parse(&owner::origin_for("api.alpha.example.test")).unwrap(),
+            challenge.public_key,
+            300_000,
+        )
         .unwrap();
+    let body = json!({
+        "credential": member.credential,
+        "step_up": {"ceremony": begin["ceremony"], "credential": credential},
+    });
+    foyer.call("passkey_revoke", body).await.unwrap();
     assert!(port.observe(|| NOW).await.is_err());
 }
 

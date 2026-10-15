@@ -138,6 +138,17 @@ async fn sent_account_issue_refuses_unknown_completion_as_reconcile() {
 #[tokio::test(flavor = "multi_thread")]
 async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_voucher_link() {
     let mut f = Fixture::new().await;
+    // A held lease owns the Foyer's session lock, so the development voucher registration
+    // (an ordinary session call) is made before the lease is taken.
+    let member = f.foyer.call("lobby", json!({})).await.unwrap()["member_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let own = voucher("alpha", &member, "held-lease-own", NOW + 172800);
+    f.foyer
+        .call("development_voucher_link", own["seed"].clone())
+        .await
+        .unwrap();
     let mut lease = f
         .foyer
         .live_membership()
@@ -145,7 +156,7 @@ async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_voucher_link() 
         .await
         .unwrap();
     let lobby = lease.lobby(|| NOW).await.unwrap();
-    let member = lobby["member_id"].as_str().unwrap().to_owned();
+    assert_eq!(lobby["member_id"], member.as_str());
     assert!(
         !lobby["missing"].as_array().unwrap().is_empty(),
         "a new member still lacks admission"
@@ -167,11 +178,6 @@ async fn held_lease_reads_the_lobby_and_submits_only_a_decodable_voucher_link() 
     ));
     // A registered link is accepted and answers that member's lobby; the second
     // submission by the same member is spent and refused.
-    let own = voucher("alpha", &member, "held-lease-own", NOW + 172800);
-    f.foyer
-        .call("development_voucher_link", own["seed"].clone())
-        .await
-        .unwrap();
     let link = own["link"].as_str().unwrap();
     let after = lease
         .submit_voucher(link, Some("handle"), [1; 16], &[], || NOW)
@@ -222,13 +228,15 @@ async fn held_lease_reserves_the_chosen_handle_once_and_shows_it_in_the_lobby() 
 async fn step_up_authorizes_exactly_the_named_device_key_through_the_held_lease() {
     use crate::membership::{StepUpAction, StepUpProof};
     let mut f = Fixture::new().await;
-    let key = [42u8; 32];
     let mut lease = f
         .foyer
         .live_membership()
         .observe_lease(|| NOW)
         .await
         .unwrap();
+    // The passkey already holds its one live device key (a second key would be key substitution,
+    // refused by the owner), so the exact-key proof names that key.
+    let key = lease.observation().device_keys[0];
     let mut prove = async |lease: &mut crate::membership::MembershipLease<_>,
                            action: StepUpAction<'_>| {
         let begin = lease.step_up_begin(action, || NOW).await.unwrap();
@@ -305,8 +313,9 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
     // Finish only for the ceremony this lease began.
     let proof = prove(&mut lease, &mut f.passkeys, StepUpAction::PasskeyAdd).await;
     let begin = lease.passkey_add_begin(proof, || NOW).await.unwrap();
-    let (credential, _) = f
-        .passkeys
+    // The added passkey is a different authenticator: the original one is excluded by the ceremony.
+    let mut added_keys = passkeys();
+    let (credential, _) = added_keys
         .register_member(begin["options"].clone())
         .await
         .unwrap()
@@ -340,8 +349,50 @@ async fn a_paired_device_key_stays_pending_without_another_passkeys_approval_and
     use crate::membership::{StepUpAction, StepUpProof};
     let mut f = Fixture::new().await;
     let key = [44u8; 32];
-    let mut lease = f
-        .foyer
+    // The original passkey already holds its live device key (a second one is key substitution),
+    // so the pairing passkey is a second one, added with the original passkey's step-up.
+    let mut added_keys = passkeys();
+    {
+        let mut lease = f
+            .foyer
+            .live_membership()
+            .observe_lease(|| NOW)
+            .await
+            .unwrap();
+        let begin = lease.step_up_begin(StepUpAction::PasskeyAdd, || NOW).await.unwrap();
+        let (assertion, _) = f
+            .passkeys
+            .sign_in(begin["options"].clone())
+            .await
+            .unwrap()
+            .into_parts();
+        let proof = StepUpProof::new(
+            begin["ceremony"].as_str().unwrap().into(),
+            assertion.into_json(),
+        )
+        .unwrap();
+        let begin = lease.passkey_add_begin(proof, || NOW).await.unwrap();
+        let (credential, _) = added_keys
+            .register_member(begin["options"].clone())
+            .await
+            .unwrap()
+            .into_parts();
+        lease
+            .passkey_add_finish(begin["ceremony"].as_str().unwrap(), credential.into_json(), || NOW)
+            .await
+            .unwrap();
+    }
+    let mut companion = Foyer::new(
+        crate::HttpClient::with_roots(
+            f.tls.origin.clone(),
+            "127.0.0.1".into(),
+            None,
+            std::slice::from_ref(&f.tls.root),
+        )
+        .unwrap(),
+    );
+    login(&mut companion, &mut added_keys).await;
+    let mut lease = companion
         .live_membership()
         .observe_lease(|| NOW)
         .await
@@ -349,8 +400,7 @@ async fn a_paired_device_key_stays_pending_without_another_passkeys_approval_and
     let mut prove = async |lease: &mut crate::membership::MembershipLease<_>,
                            action: StepUpAction<'_>| {
         let begin = lease.step_up_begin(action, || NOW).await.unwrap();
-        let (credential, _) = f
-            .passkeys
+        let (credential, _) = added_keys
             .sign_in(begin["options"].clone())
             .await
             .unwrap()

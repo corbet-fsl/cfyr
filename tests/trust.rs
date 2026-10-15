@@ -167,10 +167,15 @@ async fn foyer_retains_one_real_charter_and_follows_without_session_identifiers(
     )
     .unwrap();
     let community = community("alpha", &public).await;
-    let admin = enrol(
+    // Signup cannot assign a role: the community's first admin is its founder, who signs in on the
+    // admin host with the passkey that founded it.
+    let mut founder = active::take_founder(&community).expect("a founded community has a founder");
+    let admin_session = login(
         &community,
         "api.admin.alpha.example.test",
-        Some("synthetic-admin-enrolment-capability"),
+        &mut founder.authenticator,
+        &founder.user,
+        &founder.credential,
     )
     .await;
     let mut tls = tls_door(&community).await;
@@ -179,7 +184,7 @@ async fn foyer_retains_one_real_charter_and_follows_without_session_identifiers(
     let transport = HttpClient::new(
         community.base.clone(),
         "api.admin.alpha.example.test".into(),
-        Some(admin.session),
+        Some(admin_session),
     )
     .unwrap();
     let mut foyer = Foyer::with_trust(transport, trust);

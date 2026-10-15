@@ -1,5 +1,6 @@
 //! The thin facade carries the original door's real member workflow unchanged.
 use super::*;
+use webauthn_authenticator_rs::AuthenticatorBackend as _;
 use cvld::api::{CredentialResponse, Lobby, PresentationChallenge, PresentationInput, TrustFeed};
 
 async fn issue(
@@ -127,10 +128,29 @@ async fn lobby_voucher_and_renewal_use_real_owner_authority_until_passkey_revoca
         assert_eq!(claims.devices, vec![enrolled.signing_key]);
         assert_eq!(claims.pins.len(), 1);
     }
-    member
-        .call("passkey_revoke", json!({"credential":enrolled.credential}))
+    let mut enrolled = enrolled;
+    let begin = member
+        .call(
+            "step_up_begin",
+            json!({"action": {"kind":"passkey_revoke","credential":enrolled.credential}}),
+        )
         .await
         .unwrap();
+    let challenge: ckyh::RequestChallengeResponse =
+        serde_json::from_value(begin["options"].clone()).unwrap();
+    let credential = enrolled
+        .authenticator
+        .perform_auth(
+            ckyh::Url::parse(&origin_for("api.alpha.example.test")).unwrap(),
+            challenge.public_key,
+            300_000,
+        )
+        .unwrap();
+    let body = json!({
+        "credential": enrolled.credential,
+        "step_up": {"ceremony": begin["ceremony"], "credential": credential},
+    });
+    member.call("passkey_revoke", body).await.unwrap();
     assert!(matches!(
         member.call("lobby", json!({})).await,
         Err(Error::Unauthorized)

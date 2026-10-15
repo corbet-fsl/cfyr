@@ -29,7 +29,7 @@ pub async fn login_request(
     let challenge: ckyh::RequestChallengeResponse = serde_json::from_value(start.options).unwrap();
     let credential = authenticator
         .perform_auth(
-            ckyh::Url::parse(&format!("https://{host}")).unwrap(),
+            ckyh::Url::parse(&origin_for(host)).unwrap(),
             challenge.public_key,
             300_000,
         )

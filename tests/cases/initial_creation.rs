@@ -429,10 +429,14 @@ async fn held_refresh_reborrows_actual_revocation_feed_after_device_reply() {
         result = tokio::time::timeout(Duration::from_secs(5), tls.gate.arrived.notified()) => result.unwrap(),
         _ = &mut pending => panic!("actual device reply must be held"),
     }
-    other
-        .call("passkey_revoke", json!({"credential":raw_id}))
-        .await
-        .unwrap();
+    let body = crate::test_step_up::proven(
+        &mut other,
+        &mut keys,
+        json!({"kind":"passkey_revoke","credential":raw_id}),
+        json!({"credential":raw_id}),
+    )
+    .await;
+    other.call("passkey_revoke", body).await.unwrap();
     time.store(NOW + 40, Ordering::SeqCst);
     {
         let mut current = api.trust().unwrap();

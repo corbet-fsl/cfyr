@@ -36,6 +36,11 @@ pub mod registration;
 /// Opaque correlation with one original successful session installation.
 pub mod session;
 
+/// Step-up proofs for the tests' guarded calls.
+#[cfg(test)]
+#[path = "../tests/cases/step_up.rs"]
+pub(crate) mod test_step_up;
+
 /// Thin device facade over the original owner's client and transport.
 pub struct Foyer<T> {
     shared: Rc<membership::Shared<T>>,

@@ -110,6 +110,8 @@ impl TlsIngress {
                                 | "/v1/lobby" | "/v1/device_keys" | "/v1/device_authorize"
                                 | "/v1/trust_feed" | "/v1/trust_changes" | "/v1/passkey_certificate"
                                 | "/v1/passkey_add" | "/v1/passkey_revoke" | "/v1/step_up_begin"
+                                | "/v1/device_pair_authorize" | "/v1/device_approve" | "/v1/device_confirm" | "/v1/device_revoke"
+                                | "/v1/handle_available" | "/v1/handle_reserve" | "/v1/voucher_redeem" | "/v1/development_voucher_link"
                                 | "/v1/initial_registration_begin" | "/v1/initial_creation"
                                 | "/v1/initial_publication_bind" | "/v1/presentation_challenge"
                                 | "/v1/account_credential_issue"));
@@ -312,10 +314,16 @@ impl Fixture {
                 .unwrap(),
             );
             login(&mut companion, &mut keys).await;
-            let begin = companion
-                .call("passkey_add", json!({"step":"begin"}))
-                .await
-                .unwrap();
+            let begin = {
+                let body = crate::test_step_up::proven(
+                    &mut companion,
+                    &mut keys,
+                    json!({"kind":"passkey_add"}),
+                    json!({"step":"begin"}),
+                )
+                .await;
+                companion.call("passkey_add", body).await.unwrap()
+            };
             let mut added = passkeys();
             let (credential, custody) = added
                 .register_member(begin["options"].clone())
@@ -588,10 +596,14 @@ async fn actual_passkey_revocation_feed_is_reborrowed_after_certificate_wait() {
         result = &mut pending => panic!("certificate waiter must be gated, success={}", result.is_ok()),
         result = tokio::time::timeout(Duration::from_secs(5), f.tls.gate.arrived.notified()) => result.unwrap(),
     }
-    companion
-        .call("passkey_revoke", json!({"credential":f.original_id}))
-        .await
-        .unwrap();
+    let body = crate::test_step_up::proven(
+        &mut companion,
+        &mut keys,
+        json!({"kind":"passkey_revoke","credential":f.original_id}),
+        json!({"credential":f.original_id}),
+    )
+    .await;
+    companion.call("passkey_revoke", body).await.unwrap();
     f.clock.store(NOW + 40, Ordering::SeqCst);
     {
         let mut trust = f.foyer.trust().unwrap();

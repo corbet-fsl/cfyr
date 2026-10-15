@@ -287,6 +287,18 @@ async fn lost_real_finish_reply_never_infers_absence_and_fresh_login_reads_origi
             clock.store(expires, Ordering::SeqCst);
             f.tls.gate.release.notify_one();
             assert!(matches!(future.await, Err(Error::Reconcile)));
+            // The followed Charter has seen the later time and never sees time run backwards: the
+            // device restarts with a fresh follower, as after the closed owner below.
+            f.api = Foyer::with_trust(
+                crate::HttpClient::with_roots(
+                    f.tls.origin.clone(),
+                    "127.0.0.1".into(),
+                    None,
+                    std::slice::from_ref(&f.tls.root),
+                )
+                .unwrap(),
+                trust(&f.service, &f.tls).await,
+            );
         } else {
             closing_owner.close();
             assert!(matches!(future.await, Err(Error::Reconcile)));

@@ -124,10 +124,14 @@ async fn original_issuer_rejects_foreign_challenge_and_revoked_session_key() {
     let public = request(&mut pending, &mut holder);
     let mut companion = foyer(&f.tls);
     login(&mut companion, &mut added).await;
-    companion
-        .call("passkey_revoke", json!({"credential":f.original_id}))
-        .await
-        .unwrap();
+    let body = crate::test_step_up::proven(
+        &mut companion,
+        &mut added,
+        json!({"kind":"passkey_revoke","credential":f.original_id}),
+        json!({"credential":f.original_id}),
+    )
+    .await;
+    companion.call("passkey_revoke", body).await.unwrap();
     assert!(pending.issue(public, || NOW).await.is_err());
     assert!(pending.with_current(|| NOW, |_, _, _, _, _| ()).is_err());
 

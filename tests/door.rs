@@ -7,6 +7,7 @@ mod support;
 use cfyr::{Error, Foyer, HttpClient, action};
 use serde_json::json;
 use support::*;
+use webauthn_authenticator_rs::AuthenticatorBackend as _;
 
 fn foyer(service: &Running, host: &str, session: Option<String>) -> Foyer<HttpClient> {
     Foyer::new(HttpClient::new(service.base.clone(), host.into(), session).unwrap())
@@ -36,15 +37,22 @@ async fn trusted_login_installs_a_session_and_exports_only_safe_identity_fields(
             "root",
         ),
     ] {
-        let mut member = enrol(&service, host, bootstrap).await;
-        let request = login_request(
-            &service,
-            host,
-            &mut member.authenticator,
-            &member.user,
-            &member.credential,
-        )
-        .await;
+        // The operator Root is enrolled once per Global: its sign-in assertion comes from that
+        // one passkey (the enrolment helper only returns a session for it).
+        let (user, request) = if host == ROOT {
+            active::root_login_request(&service).await
+        } else {
+            let mut member = enrol(&service, host, bootstrap).await;
+            let request = login_request(
+                &service,
+                host,
+                &mut member.authenticator,
+                &member.user,
+                &member.credential,
+            )
+            .await;
+            (member.user, request)
+        };
         let mut api = foyer(&service, host, None);
         assert!(action("login_finish").is_none());
         assert!(cfyr::contract()["paths"]["/v1/login_finish"].is_null());
@@ -53,7 +61,7 @@ async fn trusted_login_installs_a_session_and_exports_only_safe_identity_fields(
             Err(Error::Invalid)
         ));
         let info = api.authenticate(request.clone()).await.unwrap();
-        assert_eq!(info.user, member.user);
+        assert_eq!(info.user, user);
         assert_eq!(info.role, role);
         assert!(info.expires > NOW);
         let safe = serde_json::to_value(&info).unwrap();
@@ -84,17 +92,10 @@ async fn public_member_and_root_requests_reach_the_real_owner() {
         public.call("../logout", json!({})).await,
         Err(Error::Invalid)
     ));
-    let member = enrol(&service, WALLET, None).await;
-    let member_user = member.user.clone();
-    let mut member = foyer(&service, WALLET, Some(member.session));
+    let mut enrolled = enrol(&service, WALLET, None).await;
+    let mut member = foyer(&service, WALLET, Some(enrolled.session.clone()));
     member.call("development_gate", json!({})).await.unwrap();
     assert!(member.call("passport_challenge", json!({})).await.is_ok());
-    assert!(matches!(
-        member
-            .call("global_suspend", json!({"user":"wrong","until":NOW+1}))
-            .await,
-        Err(Error::Forbidden)
-    ));
     let root = enrol(
         &service,
         ROOT,
@@ -102,15 +103,34 @@ async fn public_member_and_root_requests_reach_the_real_owner() {
     )
     .await;
     let mut root = foyer(&service, ROOT, Some(root.session));
-    root.call("global_warn", json!({"user": member_user}))
+    // The operator routes that warned or suspended a member were removed: no role can call them, and
+    // the owner contract does not forward them.
+    for name in ["global_warn", "global_suspend"] {
+        assert!(action(name).is_none());
+        let body = json!({"user":"00000000-0000-4000-8000-0000000000ff","until":NOW+1});
+        assert!(matches!(member.call(name, body.clone()).await, Err(Error::Invalid)));
+        assert!(matches!(root.call(name, body).await, Err(Error::Invalid)));
+    }
+    assert!(member.call("passport_challenge", json!({})).await.is_ok());
+    // The member alone ends its own access, permanently, with a fresh passkey ceremony.
+    let begin = member.call("global_self_ban_begin", json!({})).await.unwrap();
+    let challenge: ckyh::RequestChallengeResponse =
+        serde_json::from_value(begin["options"].clone()).unwrap();
+    let credential = enrolled
+        .authenticator
+        .perform_auth(
+            ckyh::Url::parse(&origin_for(WALLET)).unwrap(),
+            challenge.public_key,
+            300_000,
+        )
+        .unwrap();
+    member
+        .call(
+            "global_self_ban_finish",
+            json!({"ceremony": begin["ceremony"], "credential": credential}),
+        )
         .await
         .unwrap();
-    root.call(
-        "global_suspend",
-        json!({"user": member_user, "until": (NOW / 86_400 + 1) * 86_400}),
-    )
-    .await
-    .unwrap();
     assert!(member.call("passport_challenge", json!({})).await.is_err());
     root.call("logout", json!({})).await.unwrap();
     assert!(matches!(
@@ -131,13 +151,18 @@ async fn community_admin_uses_the_same_registry_and_cannot_become_root() {
     .unwrap();
     let community = community("alpha", &public).await;
     let host = "api.admin.alpha.example.test";
-    let admin = enrol(
+    // Signup cannot assign a role: the community's first admin is its founder, who signs in on
+    // the admin host with the passkey that founded it.
+    let mut founder = active::take_founder(&community).expect("a founded community has a founder");
+    let session = login(
         &community,
         host,
-        Some("synthetic-admin-enrolment-capability"),
+        &mut founder.authenticator,
+        &founder.user,
+        &founder.credential,
     )
     .await;
-    let mut admin = foyer(&community, host, Some(admin.session));
+    let mut admin = foyer(&community, host, Some(session));
     let metadata = action("setting_set").unwrap();
     assert_eq!(metadata.schema()["x-role"], "admin");
     assert_eq!(metadata.schema()["x-scope"], "community");
