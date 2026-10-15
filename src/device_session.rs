@@ -4,9 +4,7 @@ use crate::{Error, Foyer, Result, SessionInfo, SessionTransport, Transport};
 use serde::Deserialize;
 
 /// The join protocol's public constants and signed message, from the original server.
-pub use cvld::device_session::{
-    JOIN_ACTION, UNFOUNDED_FINGERPRINT_TAG, join_message, join_payload, scope_fingerprint,
-};
+pub use cvld::device_session::{JOIN_ACTION, join_message, join_payload};
 
 /// The original server's one-use nonce. The signed message is rebuilt with
 /// `cvld::device_session::message(community, &nonce, issued)`.

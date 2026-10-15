@@ -744,12 +744,32 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
     let anonymous = client(&service, HOST, None);
     let feed: cvld::api::TrustFeed =
         serde_json::from_value(anonymous.call("trust_feed", json!({})).await.unwrap()).unwrap();
-    let scope = cpsd::StampScope::new(
+    // The device pins the community fingerprint (SHA-256 of the founding key), follows the
+    // community anchored to it, and builds the scope from its verified Charter as cmsg
+    // device_join::stamp_scope does. The server accepting the join below proves that it
+    // derives the same scope.
+    let founding = csgn::verify_genesis(feed.genesis.as_deref().unwrap())
+        .unwrap()
+        .founding_key();
+    let pinned = csgn::community_fingerprint("alpha", Some(&founding));
+    let mut anchored = crate::trust::Trust::anchored_native(
+        &crate::trust::Anchor {
+            origin: &tls.origin,
+            community: "alpha",
+            fingerprint: pinned,
+            minimum_revision: 1,
+            pin: None,
+        },
+        feed_config(),
+        std::slice::from_ref(&tls.root),
+    )
+    .unwrap();
+    anchored.start(|| NOW).await.unwrap();
+    let verified = anchored.current(NOW).unwrap().fingerprint().copied();
+    assert_eq!(verified, Some(pinned), "the device verifies the pinned fingerprint");
+    let scope = cpsd::StampScope::of_community(
         cpsd::CommunityId::new("alpha").unwrap(),
-        cpsd::CommunityFingerprint::from_bytes(crate::device_session::scope_fingerprint(
-            "alpha",
-            feed.genesis.as_deref().map(csgn::fingerprint).as_ref(),
-        )),
+        verified.as_ref(),
     );
     let action = cpsd::StampAction::new(
         cpsd::ActionKind::new(crate::device_session::JOIN_ACTION).unwrap(),
