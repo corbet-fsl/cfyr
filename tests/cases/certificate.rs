@@ -748,7 +748,7 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
         cpsd::CommunityId::new("alpha").unwrap(),
         cpsd::CommunityFingerprint::from_bytes(crate::device_session::scope_fingerprint(
             "alpha",
-            feed.genesis.as_deref(),
+            feed.genesis.as_deref().map(csgn::fingerprint).as_ref(),
         )),
     );
     let action = cpsd::StampAction::new(
