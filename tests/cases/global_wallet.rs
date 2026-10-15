@@ -82,7 +82,9 @@ struct Fixture {
 }
 impl Fixture {
     async fn new() -> Self {
-        let service = global(100).await;
+        Self::on(global(100).await).await
+    }
+    async fn on(service: Running) -> Self {
         let tls = TlsIngress::new(&service).await;
         let mut foyer = foyer(&tls);
         let pending = foyer.begin_member_registration(None).await.unwrap();
@@ -164,6 +166,28 @@ async fn actual_global_host_and_current_login_key_have_a_terminal_live_clock() {
     let mut lease = live.observe_lease(|| NOW).await.unwrap();
     assert!(lease.check(|| deadline).is_err());
     assert!(lease.user().is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn wallet_stamp_trust_comes_from_the_signed_global_status_of_this_session() {
+    let f = Fixture::on(configured_wallet(100).await).await;
+    let mut lease = f.live().observe_lease(|| NOW).await.unwrap();
+    let trust = lease.stamp_trust(|| NOW).await.unwrap();
+    // The genuine wallet's configured stamp key, the open period of its ring.
+    assert!(format!("{trust:?}").contains("KeyId(wallet-stamp-1)"));
+    assert_eq!(lease.check(|| NOW + 1).unwrap(), NOW + 1);
+    // The session deadline still holds after the read.
+    let deadline = lease.expires().unwrap();
+    assert!(lease.stamp_trust(|| deadline).await.is_err());
+    assert!(lease.user().is_err());
+    // A wallet that issues no stamps names no stamp key: no trust.
+    let f = Fixture::new().await;
+    let mut lease = f.live().observe_lease(|| NOW).await.unwrap();
+    assert!(matches!(
+        lease.stamp_trust(|| NOW).await,
+        Err(Error::Reconcile)
+    ));
+    assert!(lease.check(|| NOW).is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]

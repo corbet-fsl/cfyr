@@ -192,6 +192,37 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         Ok(())
     }
 
+    /// The wallet's stamp trust (key ring with periods, cohort) from its signed global
+    /// status, read through this same authenticated wallet session and verified under the
+    /// global key ring at the device's time. Trust for building and checking this device's
+    /// own genesis evidence; the community and peers verify against their own anchors.
+    pub async fn stamp_trust(
+        &mut self,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<cnvy::cchr::StampTrust> {
+        let started = self.check(&mut clock)?;
+        self.checked_at = None;
+        let public = self
+            .held
+            .client
+            .forward("global_public", serde_json::json!({}))
+            .await?;
+        let now = clock();
+        let owner = self.owner.upgrade().ok_or(Error::Unavailable)?;
+        if owner.is_closed() || now < started || now >= self.expires {
+            return Err(Error::Unauthorized);
+        }
+        let trust = cnvy::cchr::global_stamp_trust(
+            &passport::bytes(&public, "key_ring")?,
+            &passport::bytes(&public, "status")?,
+            now,
+        )
+        .map_err(|_| Error::Reconcile)?;
+        self.checked_at = Some(now);
+        self.check(&mut clock)?;
+        Ok(trust)
+    }
+
     /// Exact original global account ID. It is public session metadata, never
     /// community membership, a pseudonym, a certificate or a custody verdict.
     pub fn user(&self) -> Result<&str> {
