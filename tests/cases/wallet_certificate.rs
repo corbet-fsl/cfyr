@@ -54,6 +54,9 @@ async fn running() -> Running {
         signing_seed_file: seed.to_str().unwrap().into(),
         publication_file: settings.to_str().unwrap().into(),
         signer_max_seconds: SIGNER_SECONDS,
+        stamp_key_file: None,
+        stamp_limit: None,
+        stamp_period_seconds: None,
     });
     let clock = Arc::new(TestClock(AtomicU64::new(NOW)));
     let door = cvld::service::Door::global(config, clock.clone())
