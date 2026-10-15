@@ -104,6 +104,7 @@ impl<T: Transport> Foyer<T> {
         if action == "logout" {
             retained.info = None;
             retained.login_credential = None;
+            retained.device_session = false;
         }
         retained.client.forward(action, request).await
     }
@@ -135,6 +136,7 @@ impl<T: SessionTransport> Foyer<T> {
         // public SessionInfo values do not identify the same server session.
         retained.info = None;
         retained.login_credential = None;
+        retained.device_session = false;
         retained.authentication = retained
             .authentication
             .checked_add(1)
@@ -146,6 +148,7 @@ impl<T: SessionTransport> Foyer<T> {
         };
         retained.info = Some(info.clone());
         retained.login_credential = original_id;
+        retained.device_session = device;
         Ok(info)
     }
 }

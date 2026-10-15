@@ -118,16 +118,24 @@ impl<T> InitialCreationLease<'_, T> {
         self.checked_at.ok_or(Error::Unauthorized)?;
         Ok(self.publication)
     }
-    /// Original selected credential; the candidate owner must match its own key.
+    /// Original selected credential; the candidate owner must match its own key. For a
+    /// device-key member, the session's device key.
     pub fn credential_id(&self) -> Result<&[u8]> {
         self.checked_at.ok_or(Error::Unauthorized)?;
         self.certified.credential_id()
+    }
+    /// The session's device key when this provenance belongs to a device-key member (no
+    /// passkey certificate exists then); `None` for an original passkey.
+    pub fn device_key(&self) -> Result<Option<[u8; 32]>> {
+        self.checked_at.ok_or(Error::Unauthorized)?;
+        self.certified.device_key()
     }
     /// Fresh server/current-owner observation floor, not an invented timestamp.
     pub fn checked_at(&self) -> Result<u64> {
         self.checked_at.ok_or(Error::Unauthorized)
     }
-    /// Original current certificate bytes. These never replace genesis evidence.
+    /// Original current certificate bytes. These never replace genesis evidence. A
+    /// device-key member has none: refused.
     pub fn certificate_bytes(&self) -> Result<&[u8]> {
         self.checked_at.ok_or(Error::Unauthorized)?;
         self.certified.certificate_bytes()

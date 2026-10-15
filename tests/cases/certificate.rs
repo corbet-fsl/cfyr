@@ -114,7 +114,8 @@ impl TlsIngress {
                                 | "/v1/handle_available" | "/v1/handle_reserve" | "/v1/voucher_redeem" | "/v1/development_voucher_link"
                                 | "/v1/initial_registration_begin" | "/v1/initial_creation"
                                 | "/v1/initial_publication_bind" | "/v1/presentation_challenge"
-                                | "/v1/account_credential_issue"));
+                                | "/v1/account_credential_issue"
+                                | "/v1/device_session_begin" | "/v1/device_session_finish"));
                             // Fixed, test-owned virtual-host ingress route. It never
                             // takes the upstream URL or Host from request JSON.
                             // The WebAuthn vault realm stays the original VAULT;
@@ -626,3 +627,254 @@ mod initial_registration;
 
 #[path = "accounting.rs"]
 mod accounting;
+
+/// A wallet member holding a passport in an opaque holder, as the device keeps it.
+async fn stamp_wallet(global: &Running, seed: u8) -> (Member, cpsd::OpaqueHolder) {
+    let member = enrol(global, WALLET, None).await;
+    let wallet = client(global, WALLET, Some(&member.session));
+    wallet.call("development_gate", json!({})).await.unwrap();
+    let public: cvld::api::GlobalPublic =
+        serde_json::from_value(wallet.call("global_public", json!({})).await.unwrap()).unwrap();
+    let issuer = cpsd::IssuerPublicKey::from_bytes(&public.issuer).unwrap();
+    let mut holder = cpsd::OpaqueHolder::from_seed(&mut [seed; 32]);
+    let challenge: cvld::api::Bytes =
+        serde_json::from_value(wallet.call("passport_challenge", json!({})).await.unwrap())
+            .unwrap();
+    let challenge = cpsd::IssuanceChallenge::from_bytes(challenge.bytes.try_into().unwrap());
+    let request = holder
+        .begin_issuance(&mut cpsd::rand::rngs::OsRng, &issuer, &challenge)
+        .unwrap();
+    let response: cvld::api::Bytes = serde_json::from_value(
+        wallet
+            .call(
+                "passport_issue",
+                json!({"challenge":challenge.to_bytes().to_vec(),"request":request.to_bytes()}),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    holder
+        .finish_issuance(&cpsd::BlindPassport::from_bytes(&response.bytes).unwrap())
+        .unwrap();
+    (member, holder)
+}
+
+/// The ONE wallet confirmation: a stamp covering `actions`, issued blindly after one
+/// user-verifying assertion of the wallet passkey over the request's confirmation challenge.
+async fn issue_stamp(
+    global: &Running,
+    member: &mut Member,
+    holder: &mut cpsd::OpaqueHolder,
+    actions: &[(cpsd::StampScope, cpsd::StampAction)],
+) {
+    use webauthn_authenticator_rs::AuthenticatorBackend as _;
+    let wallet = client(global, WALLET, Some(&member.session));
+    let reserved: cvld::api::StampChallenge =
+        serde_json::from_value(wallet.call("stamp_challenge", json!({})).await.unwrap()).unwrap();
+    let challenge = cpsd::IssuanceChallenge::from_bytes(reserved.challenge.try_into().unwrap());
+    let key = cpsd::StampPublicKey::from_bytes(&reserved.key).unwrap();
+    let request = holder
+        .begin_stamp(&mut cpsd::rand::rngs::OsRng, &key, &challenge, actions, NOW)
+        .unwrap();
+    let mut options: ckyh::RequestChallengeResponse =
+        serde_json::from_value(reserved.options).unwrap();
+    options.public_key.challenge = request.confirmation_challenge(&challenge).to_vec().into();
+    let credential = member
+        .authenticator
+        .perform_auth(
+            ckyh::Url::parse(&origin_for(WALLET)).unwrap(),
+            options.public_key,
+            300_000,
+        )
+        .unwrap();
+    let public: ckyh::PublicKeyCredential =
+        serde_json::from_value(serde_json::to_value(&credential).unwrap()).unwrap();
+    let assertion = json!({
+        "credential_id": public.raw_id.as_ref().to_vec(),
+        "client_data_json": public.response.client_data_json.as_ref().to_vec(),
+        "authenticator_data": public.response.authenticator_data.as_ref().to_vec(),
+        "signature": public.response.signature.as_ref().to_vec(),
+        "user_handle": public.response.user_handle.as_ref().map(|h| h.as_ref().to_vec()),
+    });
+    let blind: cvld::api::Bytes = serde_json::from_value(
+        wallet
+            .call(
+                "stamp_issue",
+                json!({"challenge":challenge.to_bytes().to_vec(),"request":request.to_bytes(),"assertion":assertion}),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    holder
+        .finish_stamp(&cpsd::BlindStamp::from_bytes(&blind.bytes).unwrap(), NOW)
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_certificate() {
+    use ed25519_dalek::Signer as _;
+    let global = configured_wallet(100).await;
+    let (mut member, mut holder) = stamp_wallet(&global, 61).await;
+    let public: cvld::api::GlobalPublic = serde_json::from_value(
+        client(&global, WALLET, None)
+            .call("global_public", json!({}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let service = community("alpha", &public).await;
+    let tls = TlsIngress::new(&service).await;
+    let original = trust(&service, &tls).await;
+    let mut foyer = Foyer::with_trust(
+        crate::HttpClient::with_roots(
+            tls.origin.clone(),
+            "127.0.0.1".into(),
+            None,
+            std::slice::from_ref(&tls.root),
+        )
+        .unwrap(),
+        original,
+    );
+    let device = ed25519_dalek::SigningKey::from_bytes(&[71; 32]);
+    let key = device.verifying_key().to_bytes();
+    let (seed, salt) = ([33; 32], [9; 32]);
+    // Join by passport plus ONE stamp over the device key and the creation seed.
+    let anonymous = client(&service, HOST, None);
+    let feed: cvld::api::TrustFeed =
+        serde_json::from_value(anonymous.call("trust_feed", json!({})).await.unwrap()).unwrap();
+    let scope = cpsd::StampScope::new(
+        cpsd::CommunityId::new("alpha").unwrap(),
+        cpsd::CommunityFingerprint::from_bytes(crate::device_session::scope_fingerprint(
+            "alpha",
+            feed.genesis.as_deref(),
+        )),
+    );
+    let action = cpsd::StampAction::new(
+        cpsd::ActionKind::new(crate::device_session::JOIN_ACTION).unwrap(),
+        cpsd::PayloadDigest::from_bytes(crate::device_session::join_payload(&key, &seed)),
+        cpsd::StampSalt::from_bytes(salt),
+    );
+    issue_stamp(
+        &global,
+        &mut member,
+        &mut holder,
+        &[(scope.clone(), action.clone())],
+    )
+    .await;
+    let challenge: cvld::api::PresentationChallenge = serde_json::from_value(
+        anonymous
+            .call("presentation_challenge", json!({}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let expected = cpsd::AuthenticatedCommunity::from_authenticated_origin(
+        cpsd::CommunityId::new("alpha").unwrap(),
+        csgn::KeyRing::from_cbor(&feed.key_ring).unwrap(),
+    );
+    let proof = holder
+        .present(
+            &mut cpsd::rand::rngs::OsRng,
+            &expected,
+            &challenge.request,
+            NOW,
+        )
+        .unwrap();
+    let stamp = holder
+        .present_stamp(&mut cpsd::rand::rngs::OsRng, &scope, &action, NOW)
+        .unwrap();
+    let joined: cvld::api::DeviceJoined = serde_json::from_value(
+        anonymous
+            .call(
+                "device_join",
+                json!({
+                    "passport": {"challenge": challenge.challenge, "proof": proof.to_bytes()},
+                    "stamp": stamp.to_bytes(),
+                    "salt": salt,
+                    "device_key": key,
+                    "seed": seed,
+                    "signature": device
+                        .sign(&crate::device_session::join_message("alpha", &challenge.challenge, &key))
+                        .to_bytes()
+                        .to_vec(),
+                }),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    // Silent device session through the same held TLS Foyer.
+    let nonce = foyer.begin_device_session().await.unwrap();
+    let signature = device.sign(&nonce.message("alpha")).to_bytes().to_vec();
+    foyer
+        .finish_device_session(nonce.nonce, &joined.user, key, signature)
+        .await
+        .unwrap();
+    let mut live = foyer.live_membership();
+    let mut policy = foyer.current_policy();
+    // No passkey certificate exists for a device-key member.
+    let lease = live.observe_lease(|| NOW).await.unwrap();
+    assert!(lease.observation().device_keys.contains(&key));
+    assert!(
+        lease
+            .passkey_certificate(&mut policy, || NOW)
+            .await
+            .is_err()
+    );
+    // The device lease answers from the commitment the stamped join stored.
+    let lease = live.observe_lease(|| NOW).await.unwrap();
+    let mut initial = lease
+        .device_initial_creation(&mut policy, || NOW)
+        .await
+        .unwrap();
+    assert_eq!(initial.seed().unwrap(), seed);
+    assert_eq!(initial.publication().unwrap(), None);
+    assert_eq!(initial.device_key().unwrap(), Some(key));
+    assert_eq!(initial.credential_id().unwrap(), key.as_slice());
+    assert!(initial.certificate_bytes().is_err());
+    initial.check(|| NOW + 1).unwrap();
+    // Clocks never run backwards.
+    assert!(initial.check(|| NOW).is_err());
+    drop(initial);
+    let lease = live.observe_lease(|| NOW + 2).await.unwrap();
+    let initial = lease
+        .device_initial_creation(&mut policy, || NOW + 2)
+        .await
+        .unwrap();
+    let mut bound = initial
+        .bind_publication([55; 32], || NOW + 2)
+        .await
+        .unwrap();
+    assert_eq!(bound.publication().unwrap(), Some([55; 32]));
+    bound.refresh(|| NOW + 3).await.unwrap();
+    // A different winner is refused by the server's one-winner bind.
+    drop(bound);
+    let lease = live.observe_lease(|| NOW + 4).await.unwrap();
+    let initial = lease
+        .device_initial_creation(&mut policy, || NOW + 4)
+        .await
+        .unwrap();
+    assert_eq!(initial.publication().unwrap(), Some([55; 32]));
+    assert!(
+        initial
+            .bind_publication([56; 32], || NOW + 4)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_passkey_session_has_no_device_initial_creation() {
+    let f = Fixture::new().await;
+    let mut live = f.foyer.live_membership();
+    let lease = live.observe_lease(|| NOW).await.unwrap();
+    let mut policy = f.foyer.current_policy();
+    assert!(
+        lease
+            .device_initial_creation(&mut policy, || NOW)
+            .await
+            .is_err()
+    );
+}

@@ -22,6 +22,9 @@ pub struct CertifiedMembershipLease<'p, T> {
     signed: Vec<u8>,
     origin: String,
     checked: Option<CheckedCertificate>,
+    /// A device-key session: the credential is the session's own device key and no passkey
+    /// certificate exists (`signed` is empty).
+    device: bool,
 }
 
 /// The same original registered key joined to its exact next successful session.
@@ -113,7 +116,47 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
                 last_checked: completed,
                 expires,
             }),
+            device: false,
         })
+    }
+
+    /// The initial-creation provenance of a DEVICE-KEY member (one-confirmation model): the
+    /// same held original session and Charter, with the session's own device key in place of
+    /// a passkey certificate. The key must be the held session's login credential and among
+    /// the member's live device keys at every check; the server answers from the commitment
+    /// stored with the member's first device key at the stamped join. A passkey session,
+    /// a wallet observation or a key no longer live refuses.
+    pub async fn device_initial_creation<'p>(
+        self,
+        policy: &'p mut CurrentPolicy<T>,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<InitialCreationLease<'p, T>> {
+        let origin = self.held.client.authenticated_origin()?;
+        policy.check_origin(&self.owner, &origin)?;
+        let mut lease = self;
+        let completed = lease.check(&mut clock)?;
+        let key = lease
+            .held
+            .login_credential
+            .clone()
+            .filter(|key| lease.held.device_session && key.len() == 32)
+            .ok_or(Error::Unauthorized)?;
+        let expires = lease.observation.expires;
+        let mut certified = CertifiedMembershipLease {
+            lease,
+            policy,
+            signed: Vec::new(),
+            origin,
+            checked: Some(CheckedCertificate {
+                credential: key,
+                server_checked_at: completed,
+                last_checked: completed,
+                expires,
+            }),
+            device: true,
+        };
+        certified.check(&mut clock)?;
+        certified.initial_creation(clock).await
     }
 }
 
@@ -136,13 +179,31 @@ impl<'p, T> CertifiedMembershipLease<'p, T> {
         Ok(&self.lease.observation)
     }
     /// Original authenticated certificate bytes; this read proves no currentness.
+    /// A device-key lease has no passkey certificate and refuses.
     pub fn certificate_bytes(&self) -> Result<&[u8]> {
         self.checked.as_ref().ok_or(Error::Unauthorized)?;
+        if self.device {
+            return Err(Error::Unauthorized);
+        }
         Ok(&self.signed)
     }
-    /// Exact registered credential ID obtained from the current original verifier.
+    /// Exact registered credential ID obtained from the current original verifier; for a
+    /// device-key lease, the session's device key.
     pub fn credential_id(&self) -> Result<&[u8]> {
         Ok(&self.checked.as_ref().ok_or(Error::Unauthorized)?.credential)
+    }
+    /// The session's device key for a device-key lease; `None` for a passkey lease.
+    pub fn device_key(&self) -> Result<Option<[u8; 32]>> {
+        let checked = self.checked.as_ref().ok_or(Error::Unauthorized)?;
+        if !self.device {
+            return Ok(None);
+        }
+        checked
+            .credential
+            .as_slice()
+            .try_into()
+            .map(Some)
+            .map_err(|_| Error::Unauthorized)
     }
     /// Actual checked time from this fresh authenticated server response. It is
     /// not memory of any later observation lost during a device restart.
@@ -193,8 +254,23 @@ impl<'p, T> CertifiedMembershipLease<'p, T> {
             return Err(Error::Unauthorized);
         }
         self.policy.check_origin(&self.lease.owner, &self.origin)?;
-        let expires = self
-            .policy
+        let expires = if self.device {
+            self.device_current(&checked.credential, now)?
+        } else {
+            self.passkey_current(&checked.credential, now)?
+        };
+        checked.expires = checked.expires.min(expires);
+        if now >= checked.expires {
+            return Err(Error::Unauthorized);
+        }
+        checked.last_checked = now;
+        self.checked = Some(checked);
+        Ok(now)
+    }
+
+    /// The passkey certificate, verified under the current Charter for this member and key.
+    fn passkey_current(&mut self, credential: &[u8], now: u64) -> Result<u64> {
+        self.policy
             .with_current(now, |current| {
                 if matches!(self.lease.scope, ObservationScope::Wallet)
                     && current.community() != "wallet"
@@ -206,20 +282,37 @@ impl<'p, T> CertifiedMembershipLease<'p, T> {
                     &self.lease.observation.member,
                     now,
                 )?;
-                if certificate.credential_id(now)? != checked.credential.as_slice() {
+                if certificate.credential_id(now)? != credential {
                     return Err(cnvy::cchr::Error::Unauthenticated);
                 }
                 Ok(certificate.valid_until())
             })
             .map_err(|_| Error::Unauthorized)?
-            .map_err(|_| Error::Unauthorized)?;
-        checked.expires = checked.expires.min(expires);
-        if now >= checked.expires {
+            .map_err(|_| Error::Unauthorized)
+    }
+
+    /// The held community session's own device key, still among the member's live keys of
+    /// the latest original observation, under a current community (never wallet) Charter.
+    /// Bounded by the session deadline only.
+    fn device_current(&mut self, key: &[u8], now: u64) -> Result<u64> {
+        let held = &self.lease.held;
+        if !matches!(self.lease.scope, ObservationScope::Community)
+            || !held.device_session
+            || held.login_credential.as_deref() != Some(key)
+            || !self
+                .lease
+                .observation
+                .device_keys
+                .iter()
+                .any(|live| live.as_slice() == key)
+        {
             return Err(Error::Unauthorized);
         }
-        checked.last_checked = now;
-        self.checked = Some(checked);
-        Ok(now)
+        self.policy
+            .with_current(now, |current| current.community() != "wallet")
+            .map_err(|_| Error::Unauthorized)?
+            .then_some(self.lease.observation.expires)
+            .ok_or(Error::Unauthorized)
     }
     /// Join only original successful registration on this same owner/session/key.
     /// A foreign, expired or different-key registration consumes both owners.

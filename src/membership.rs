@@ -28,6 +28,9 @@ pub(crate) struct Retained<T> {
     pub(crate) info: Option<SessionInfo>,
     pub(crate) authentication: u64,
     pub(crate) login_credential: Option<Vec<u8>>,
+    /// The retained session was opened by a community device key (`login_credential` is that
+    /// key), not by a passkey.
+    pub(crate) device_session: bool,
 }
 #[derive(Default)]
 struct Lifetime {
@@ -85,6 +88,7 @@ impl<T: Transport> Shared<T> {
                 info: None,
                 authentication: 0,
                 login_credential: None,
+                device_session: false,
             })),
             lifetime: RefCell::default(),
         }
