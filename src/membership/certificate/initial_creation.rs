@@ -227,22 +227,45 @@ impl<T: AuthenticatedTransport> InitialCreationLease<'_, T> {
     /// refuses. Unknown completion consumes this attempt and requires a fresh
     /// authenticated query, never a replacement candidate or another Create.
     pub async fn bind_publication(
+        self,
+        publication: [u8; 32],
+        clock: impl FnMut() -> u64,
+    ) -> Result<Self> {
+        self.bind(publication, None, clock).await
+    }
+
+    /// [`Self::bind_publication`] for a device-key member's first lineage: the server requires
+    /// `evidence`, the `cchr::GenesisStampEvidence` bytes (cvlt's stamp `LineageEvidence`
+    /// bytes) of the receipt, verifies them and records the stamp once before its one-winner bind.
+    pub async fn bind_publication_with_evidence(
+        self,
+        publication: [u8; 32],
+        evidence: &[u8],
+        clock: impl FnMut() -> u64,
+    ) -> Result<Self> {
+        if evidence.is_empty() {
+            return Err(Error::Invalid);
+        }
+        self.bind(publication, Some(evidence), clock).await
+    }
+
+    async fn bind(
         mut self,
         publication: [u8; 32],
+        evidence: Option<&[u8]>,
         mut clock: impl FnMut() -> u64,
     ) -> Result<Self> {
         if publication == [0; 32] || self.publication.is_some_and(|prior| prior != publication) {
             return Err(Error::Invalid);
         }
         self.check(&mut clock)?;
+        let mut body = serde_json::json!({ "seed": self.seed, "publication": publication });
+        if let Some(evidence) = evidence {
+            body["evidence"] = serde_json::json!(evidence);
+        }
         let response = self
             .certified
-            .initial_request(
-                "initial_publication_bind",
-                serde_json::json!({ "seed": self.seed, "publication": publication }),
-                true,
-                &mut clock,
-            )
+            .initial_request("initial_publication_bind", body, true, &mut clock)
             .await?;
         let (seed, observed, checked_at) = projection(&response)?;
         let completed = self.check(&mut clock).map_err(|_| Error::Reconcile)?;

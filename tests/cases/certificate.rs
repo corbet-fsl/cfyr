@@ -712,9 +712,90 @@ async fn issue_stamp(
         .unwrap();
 }
 
+#[derive(Clone, Default)]
+struct KeysStore(
+    std::rc::Rc<std::cell::RefCell<std::collections::HashMap<ckmg::Locator, Vec<u8>>>>,
+);
+impl ckmg::SecureStore for KeysStore {
+    async fn load(
+        &mut self,
+        location: &ckmg::Locator,
+    ) -> std::result::Result<Option<Vec<u8>>, ckmg::Error> {
+        Ok(self.0.borrow().get(location).cloned())
+    }
+    async fn compare_exchange(
+        &mut self,
+        location: &ckmg::Locator,
+        expected: Option<[u8; 32]>,
+        replacement: &[u8],
+    ) -> std::result::Result<ckmg::Commit, ckmg::Error> {
+        let mut records = self.0.borrow_mut();
+        if records
+            .get(location)
+            .map(|value| *blake3::hash(value).as_bytes())
+            != expected
+        {
+            return Ok(ckmg::Commit::Conflict);
+        }
+        records.insert(*location, replacement.to_vec());
+        Ok(ckmg::Commit::Committed)
+    }
+}
+struct KeysClock;
+impl ckmg::Clock for KeysClock {
+    fn now(&mut self) -> std::result::Result<u64, ckmg::Error> {
+        Ok(NOW)
+    }
+}
+/// Test-only lineage authority: every request of this one binding (no production G3).
+struct KeysAuthority(ckmg::Binding);
+impl ckmg::Authority for KeysAuthority {
+    async fn check(
+        &mut self,
+        request: ckmg::Authorization<'_>,
+    ) -> std::result::Result<(), ckmg::Error> {
+        if request.binding != &self.0 {
+            return Err(ckmg::Error::Unauthorized);
+        }
+        Ok(())
+    }
+}
+type KeysDevice = ckmg::Keys<KeysStore, KeysClock, ckmg::SystemEntropy, KeysAuthority>;
+
+/// The member's first community lineage made by Keys on the device, and its device key.
+async fn keys_device(community: &str, member: &str) -> (KeysDevice, [u8; 32], ckmg::Receipt) {
+    let prf = ckmg::passkey::PrfOutput::from_bytes(&[27; 32]).unwrap();
+    let binding = ckmg::Binding::new(community, member).unwrap();
+    let mut keys = ckmg::Keys::new(
+        KeysStore::default(),
+        KeysClock,
+        ckmg::SystemEntropy,
+        KeysAuthority(binding.clone()),
+    );
+    let receipt = keys
+        .create_scope(
+            &prf,
+            binding,
+            ckmg::DeviceInfo::new("fixture", &[7; 16]).unwrap(),
+            b"fixture",
+        )
+        .await
+        .unwrap();
+    keys.acknowledge(receipt.operation).await.unwrap();
+    keys.unlock(&prf, community).await.unwrap();
+    let key = *keys.device_public_key().await.unwrap().value();
+    (keys, key, receipt)
+}
+
+async fn device_sign(keys: &mut KeysDevice, message: &[u8]) -> Vec<u8> {
+    keys.sign_device_ed25519(message, NOW + 600)
+        .await
+        .unwrap()
+        .to_vec()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_certificate() {
-    use ed25519_dalek::Signer as _;
     let global = configured_wallet(100).await;
     let (mut member, mut holder) = stamp_wallet(&global, 61).await;
     let public: cvld::api::GlobalPublic = serde_json::from_value(
@@ -737,9 +818,12 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
         .unwrap(),
         original,
     );
-    let device = ed25519_dalek::SigningKey::from_bytes(&[71; 32]);
-    let key = device.verifying_key().to_bytes();
-    let (seed, salt) = ([33; 32], [9; 32]);
+    let pseudonym = holder
+        .pseudonym(&cpsd::CommunityId::new("alpha").unwrap())
+        .to_hex();
+    // The device makes the member's first lineage locally; its Keys device key joins.
+    let (mut device, key, receipt) = keys_device("alpha", &pseudonym).await;
+    let (seed, salt, genesis_salt) = ([33; 32], [9; 32], [12; 32]);
     // Join by passport plus ONE stamp over the device key and the creation seed.
     let anonymous = client(&service, HOST, None);
     let feed: cvld::api::TrustFeed =
@@ -776,11 +860,16 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
         cpsd::PayloadDigest::from_bytes(crate::device_session::join_payload(&key, &seed)),
         cpsd::StampSalt::from_bytes(salt),
     );
+    // ONE stamp, two slots: the join and the lineage genesis of the device's first receipt.
+    let genesis = cchr::lineage_genesis_action(&receipt, genesis_salt, NOW).unwrap();
     issue_stamp(
         &global,
         &mut member,
         &mut holder,
-        &[(scope.clone(), action.clone())],
+        &[
+            (scope.clone(), action.clone()),
+            (scope.clone(), genesis.clone()),
+        ],
     )
     .await;
     let challenge: cvld::api::PresentationChallenge = serde_json::from_value(
@@ -815,10 +904,11 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
                     "salt": salt,
                     "device_key": key,
                     "seed": seed,
-                    "signature": device
-                        .sign(&crate::device_session::join_message("alpha", &challenge.challenge, &key))
-                        .to_bytes()
-                        .to_vec(),
+                    "signature": device_sign(
+                        &mut device,
+                        &crate::device_session::join_message("alpha", &challenge.challenge, &key),
+                    )
+                    .await,
                 }),
             )
             .await
@@ -827,7 +917,7 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
     .unwrap();
     // Silent device session through the same held TLS Foyer.
     let nonce = foyer.begin_device_session().await.unwrap();
-    let signature = device.sign(&nonce.message("alpha")).to_bytes().to_vec();
+    let signature = device_sign(&mut device, &nonce.message("alpha")).await;
     foyer
         .finish_device_session(nonce.nonce, &joined.user, key, signature)
         .await
@@ -863,8 +953,30 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
         .device_initial_creation(&mut policy, || NOW + 2)
         .await
         .unwrap();
+    // A device-key member binds only with the genesis stamp evidence of its receipt.
+    assert!(
+        initial
+            .bind_publication([55; 32], || NOW + 2)
+            .await
+            .is_err()
+    );
+    let evidence = cchr::GenesisStampEvidence::new(
+        receipt.clone(),
+        &holder
+            .present_stamp(&mut cpsd::rand::rngs::OsRng, &scope, &genesis, NOW)
+            .unwrap(),
+        genesis_salt,
+        NOW,
+    )
+    .to_bytes()
+    .unwrap();
+    let lease = live.observe_lease(|| NOW + 2).await.unwrap();
+    let initial = lease
+        .device_initial_creation(&mut policy, || NOW + 2)
+        .await
+        .unwrap();
     let mut bound = initial
-        .bind_publication([55; 32], || NOW + 2)
+        .bind_publication_with_evidence([55; 32], &evidence, || NOW + 2)
         .await
         .unwrap();
     assert_eq!(bound.publication().unwrap(), Some([55; 32]));
@@ -879,7 +991,7 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
     assert_eq!(initial.publication().unwrap(), Some([55; 32]));
     assert!(
         initial
-            .bind_publication([56; 32], || NOW + 4)
+            .bind_publication_with_evidence([56; 32], &evidence, || NOW + 4)
             .await
             .is_err()
     );

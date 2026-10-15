@@ -48,6 +48,10 @@ async-trait = "0.1"
 futures-util = "0.3"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 rcgen = { version = "0.13", features = ["crypto"] }
+# A real Keys `Created` receipt and its genesis stamp evidence for device-key members.
+ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "main" }
+cchr = { git = "https://git.corbet.ch/corbet-foss/cchr.git", branch = "main" }
+blake3 = "1"
 
 [[example]]
 name = "browser-fixture"
