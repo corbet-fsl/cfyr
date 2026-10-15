@@ -12,7 +12,7 @@ pub struct GlobalPassportIssuance<T> {
     submitted: bool,
 }
 
-fn bytes(value: &Value, field: &str) -> Result<Vec<u8>> {
+pub(super) fn bytes(value: &Value, field: &str) -> Result<Vec<u8>> {
     let result: Vec<u8> =
         serde_json::from_value(value.get(field).cloned().ok_or(Error::Reconcile)?)
             .map_err(|_| Error::Reconcile)?;
@@ -27,7 +27,7 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
     // retained identity, exclusive deadline and monotonic observation. Calling
     // this through the Foyer that already holds a creation lease refuses in
     // Shared::begin_pending before it can wait on that same session mutex.
-    async fn passport_call(
+    pub(super) async fn passport_call(
         &mut self,
         action: &'static str,
         input: Value,
@@ -72,7 +72,7 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         Ok(response)
     }
 
-    async fn passport_current(&mut self, clock: &mut impl FnMut() -> u64) -> Result<Vec<u8>> {
+    pub(super) async fn passport_current(&mut self, clock: &mut impl FnMut() -> u64) -> Result<Vec<u8>> {
         let public = self
             .passport_call("global_public", json!({}), false, clock)
             .await?;
