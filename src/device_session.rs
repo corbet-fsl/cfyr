@@ -32,6 +32,21 @@ impl<T: Transport> Foyer<T> {
             .await?;
         serde_json::from_value(value).map_err(|_| Error::Reconcile)
     }
+
+    /// Join by device key (`device_join`): the passport presentation, the confirmation stamp
+    /// and the key's signature. A trusted owner action, so it is sent here and never through
+    /// the shell forwarding of [`Foyer::call`]. Returns the member the key belongs to.
+    pub async fn device_join(&mut self, request: serde_json::Value) -> Result<String> {
+        let response = {
+            let mut retained = self.shared.session.lock().await;
+            retained.client.call("device_join", request).await?
+        };
+        response
+            .get("user")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .ok_or(Error::Reconcile)
+    }
 }
 
 impl<T: SessionTransport> Foyer<T> {

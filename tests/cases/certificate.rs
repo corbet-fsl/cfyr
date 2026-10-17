@@ -115,7 +115,7 @@ impl TlsIngress {
                                 | "/v1/initial_registration_begin" | "/v1/initial_creation"
                                 | "/v1/initial_publication_bind" | "/v1/presentation_challenge"
                                 | "/v1/account_credential_issue"
-                                | "/v1/device_session_begin" | "/v1/device_session_finish"));
+                                | "/v1/device_session_begin" | "/v1/device_session_finish" | "/v1/device_join"));
                             // Fixed, test-owned virtual-host ingress route. It never
                             // takes the upstream URL or Host from request JSON.
                             // The WebAuthn vault realm stays the original VAULT;
@@ -894,11 +894,7 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
     let stamp = holder
         .present_stamp(&mut cpsd::rand::rngs::OsRng, &scope, &action, NOW)
         .unwrap();
-    let joined: cvld::api::DeviceJoined = serde_json::from_value(
-        anonymous
-            .call(
-                "device_join",
-                json!({
+    let join = json!({
                     "passport": {"challenge": challenge.challenge, "proof": proof.to_bytes()},
                     "stamp": stamp.to_bytes(),
                     "salt": salt,
@@ -909,17 +905,18 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
                         &crate::device_session::join_message("alpha", &challenge.challenge, &key),
                     )
                     .await,
-                }),
-            )
-            .await
-            .unwrap(),
-    )
-    .unwrap();
+                });
+    // A trusted owner action: never forwarded from the shell.
+    assert!(matches!(
+        foyer.call("device_join", join.clone()).await,
+        Err(Error::Invalid)
+    ));
+    let user = foyer.device_join(join).await.unwrap();
     // Silent device session through the same held TLS Foyer.
     let nonce = foyer.begin_device_session().await.unwrap();
     let signature = device_sign(&mut device, &nonce.message("alpha")).await;
     foyer
-        .finish_device_session(nonce.nonce, &joined.user, key, signature)
+        .finish_device_session(nonce.nonce, &user, key, signature)
         .await
         .unwrap();
     let mut live = foyer.live_membership();
