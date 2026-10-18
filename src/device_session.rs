@@ -1,10 +1,12 @@
 //! Device-key session forwarding. The device owner signs the public nonce with its community
 //! device key (no passkey, no prompt); Foyer only forwards and retains the resulting session.
-use crate::{Error, Foyer, Result, SessionInfo, SessionTransport, Transport};
+use crate::{Error, Foyer, Opening, Result, SessionInfo, SessionTransport, Transport};
 use serde::Deserialize;
 
 /// The join protocol's public constants and signed message, from the original server.
-pub use cvld::device_session::{JOIN_ACTION, join_message, join_payload};
+pub use cvld::device_session::{
+    GARDEN_ACTION, JOIN_ACTION, garden_payload, join_message, join_payload,
+};
 
 /// The original server's one-use nonce. The signed message is rebuilt with
 /// `cvld::device_session::message(community, &nonce, issued)`.
@@ -21,6 +23,11 @@ impl Challenge {
     /// The exact bytes the device signs: bound to the community, the nonce and the issue time.
     pub fn message(&self, community: &str) -> Vec<u8> {
         cvld::device_session::message(community, &self.nonce, self.issued)
+    }
+
+    /// The exact bytes the device signs to open an admin session.
+    pub fn garden_message(&self, community: &str) -> Vec<u8> {
+        cvld::device_session::garden_message(community, &self.nonce, self.issued)
     }
 }
 
@@ -65,7 +72,31 @@ impl<T: SessionTransport> Foyer<T> {
                 "nonce": nonce, "user": user, "device_key": device_key, "signature": signature,
             }),
             Some(device_key.to_vec()),
-            true,
+            Opening::Device,
+        )
+        .await
+    }
+
+    /// Open an ADMIN session from the device key's signature over the garden message and one
+    /// confirmation stamp (`stamp`, `salt`) that covers exactly this key and nonce. Retained
+    /// like any session; it never carries wallet custody.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn finish_garden_session(
+        &mut self,
+        nonce: [u8; 32],
+        user: &str,
+        device_key: [u8; 32],
+        signature: Vec<u8>,
+        stamp: Vec<u8>,
+        salt: [u8; 32],
+    ) -> Result<SessionInfo> {
+        self.install(
+            serde_json::json!({
+                "nonce": nonce, "user": user, "device_key": device_key,
+                "signature": signature, "stamp": stamp, "salt": salt,
+            }),
+            Some(device_key.to_vec()),
+            Opening::Garden,
         )
         .await
     }

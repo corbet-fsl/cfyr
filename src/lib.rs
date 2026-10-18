@@ -122,14 +122,14 @@ impl<T: SessionTransport> Foyer<T> {
         request: Value,
         original_id: Option<Vec<u8>>,
     ) -> Result<SessionInfo> {
-        self.install(request, original_id, false).await
+        self.install(request, original_id, Opening::Passkey).await
     }
 
     pub(crate) async fn install(
         &mut self,
         request: Value,
         original_id: Option<Vec<u8>>,
-        device: bool,
+        opening: Opening,
     ) -> Result<SessionInfo> {
         let mut retained = self.shared.session.lock().await;
         // Invalidate earlier stamps before the mutation can be sent. Identical
@@ -141,14 +141,15 @@ impl<T: SessionTransport> Foyer<T> {
             .authentication
             .checked_add(1)
             .ok_or(Error::Unavailable)?;
-        let info = if device {
-            retained.client.authenticate_device(request).await?
-        } else {
-            retained.client.authenticate(request).await?
+        let info = match opening {
+            Opening::Passkey => retained.client.authenticate(request).await?,
+            Opening::Device => retained.client.authenticate_device(request).await?,
+            Opening::Garden => retained.client.authenticate_garden(request).await?,
         };
         retained.info = Some(info.clone());
         retained.login_credential = original_id;
-        retained.device_session = device;
+        // An admin session is a device-key session, but never holds wallet custody.
+        retained.device_session = opening == Opening::Device;
         Ok(info)
     }
 }
@@ -193,6 +194,14 @@ impl<T: cvld::client::AuthenticatedTransport> Foyer<T> {
         forked.login_credential = Some(credential);
         Ok(sibling_info)
     }
+}
+
+/// How a session is opened at the original server.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Opening {
+    Passkey,
+    Device,
+    Garden,
 }
 
 impl<T> Drop for Foyer<T> {
