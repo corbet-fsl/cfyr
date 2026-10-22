@@ -49,7 +49,15 @@ async fn registered() -> Fixture {
     // C1: the finish adopted the wallet's birth session of exactly this account; a later
     // login replaces it as any login does.
     assert_eq!(
-        foyer.shared.session.lock().await.info.as_ref().unwrap().user,
+        foyer
+            .shared
+            .session
+            .lock()
+            .await
+            .info
+            .as_ref()
+            .unwrap()
+            .user,
         user
     );
     assert_eq!(login(&mut foyer, &mut keys).await, original_id);
