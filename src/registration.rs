@@ -25,6 +25,11 @@ struct Challenge {
 struct Completed {
     user: String,
     certificate: Option<Vec<u8>>,
+    /// The wallet's birth session (one-ceremony registration, C1). Accepted on the wire and
+    /// not yet adopted: until the Foyer adopts it, it is never stored and simply expires.
+    #[serde(default)]
+    #[allow(dead_code)]
+    session: Option<serde::de::IgnoredAny>,
 }
 
 /// One original pending ceremony. It cannot be copied, serialized or applied to
