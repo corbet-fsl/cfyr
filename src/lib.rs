@@ -153,6 +153,48 @@ impl<T: SessionTransport> Foyer<T> {
     }
 }
 
+impl<T: cvld::client::AuthenticatedTransport> Foyer<T> {
+    /// Fork this Foyer's live wallet passkey session (cvld `session_fork`) into `sibling`, a
+    /// Foyer of the same pinned origin, so that each can be held by its own lease. The sibling
+    /// gets a fresh server session of the same family: the same account, credential, role and
+    /// deadline; ending either session ends both. Its earlier session, if any, is dropped first.
+    pub async fn fork_into(&mut self, sibling: &mut Foyer<T>) -> Result<SessionInfo> {
+        if std::sync::Arc::ptr_eq(&self.shared.session, &sibling.shared.session) {
+            return Err(Error::Invalid);
+        }
+        let mut retained = self.shared.session.lock().await;
+        let mut forked = sibling.shared.session.lock().await;
+        let info = retained.info.clone().ok_or(Error::Unauthorized)?;
+        let credential = retained
+            .login_credential
+            .clone()
+            .filter(|id| !id.is_empty())
+            .ok_or(Error::Unauthorized)?;
+        if retained.device_session || info.role != "member" {
+            return Err(Error::Unauthorized);
+        }
+        // The sibling's bearer is only ever sent to this session's own origin.
+        if retained.client.authenticated_origin()? != forked.client.authenticated_origin()? {
+            return Err(Error::WrongHost);
+        }
+        forked.info = None;
+        forked.login_credential = None;
+        forked.device_session = false;
+        forked.authentication = forked
+            .authentication
+            .checked_add(1)
+            .ok_or(Error::Unavailable)?;
+        let sibling_info = retained.client.fork_into(&mut forked.client).await?;
+        if sibling_info != info {
+            // The server must name the parent's grant and deadline; never adopt another.
+            return Err(Error::Reconcile);
+        }
+        forked.info = Some(sibling_info.clone());
+        forked.login_credential = Some(credential);
+        Ok(sibling_info)
+    }
+}
+
 impl<T> Drop for Foyer<T> {
     fn drop(&mut self) {
         self.shared.close();

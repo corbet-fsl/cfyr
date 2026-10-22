@@ -191,6 +191,33 @@ async fn wallet_stamp_trust_comes_from_the_signed_global_status_of_this_session(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_fork_lets_two_leases_hold_one_wallet_session_family_at_once() {
+    let mut f = Fixture::new().await;
+    // Nothing to fork without a passkey session.
+    let mut unsigned = foyer(&f.tls);
+    let mut sibling = foyer(&f.tls);
+    assert!(matches!(
+        unsigned.fork_into(&mut sibling).await,
+        Err(Error::Unauthorized)
+    ));
+    let info = f.foyer.fork_into(&mut sibling).await.unwrap();
+    assert_eq!(info.user, f.user);
+    {
+        let mut parent_live = f.live();
+        let mut parent = parent_live.observe_lease(|| NOW).await.unwrap();
+        let mut sibling_live = sibling.live_global_wallet(f.tls.origin.clone());
+        let mut forked = sibling_live.observe_lease(|| NOW).await.unwrap();
+        assert_eq!(forked.user().unwrap(), f.user);
+        assert_eq!(forked.credential_id().unwrap(), f.original_id);
+        assert_eq!(forked.expires().unwrap(), parent.expires().unwrap());
+        assert_eq!(forked.expires().unwrap(), info.expires);
+    }
+    // Ending the sibling ends its parent: one family.
+    sibling.call("logout", json!({})).await.unwrap();
+    assert!(f.live().observe_lease(|| NOW).await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn actual_same_account_noncurrent_key_never_substitutes_for_current_login() {
     let mut f = Fixture::new().await;
     let (mut added, id) = f.add_key().await;
@@ -448,7 +475,8 @@ impl TlsIngress {
                                 | "/v1/global_self_ban_finish" | "/v1/wallet_trust_feed"
                                 | "/v1/wallet_trust_changes" | "/v1/wallet_device_keys"
                                 | "/v1/wallet_device_authorize" | "/v1/passkey_certificate"
-                                | "/v1/development_gate" | "/v1/passport_challenge" | "/v1/passport_issue"));
+                                | "/v1/development_gate" | "/v1/passport_challenge" | "/v1/passport_issue"
+                                | "/v1/session_fork"));
                             // Fixed, test-owned virtual-host ingress route. It never
                             // takes the upstream URL or Host from request JSON.
                             // The WebAuthn vault realm stays the original VAULT;
