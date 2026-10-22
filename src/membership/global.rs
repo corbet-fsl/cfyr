@@ -5,6 +5,8 @@ mod passport;
 pub use passport::GlobalPassportIssuance;
 mod stamp;
 pub use stamp::GlobalStampIssuance;
+mod birth;
+pub use birth::WalletBirthStatement;
 
 /// Weak read port for the trusted runtime's global-wallet HTTPS origin. Public
 /// request JSON cannot select this origin or supply an authenticated account.
@@ -134,8 +136,13 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         &mut self,
         seed: [u8; 32],
         publication: [u8; 32],
+        evidence: Option<&[u8]>,
         clock: &mut impl FnMut() -> u64,
     ) -> Result<()> {
+        let mut body = serde_json::json!({"seed":seed,"publication":publication});
+        if let Some(evidence) = evidence {
+            body["evidence"] = serde_json::json!(evidence);
+        }
         let started = self.check(&mut *clock)?;
         self.checked_at = None;
         let shared = self.owner.upgrade().ok_or(Error::Unavailable)?;
@@ -163,10 +170,7 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
                 let response = self
                     .held
                     .client
-                    .forward(
-                        "initial_publication_bind",
-                        serde_json::json!({"seed":seed,"publication":publication}),
-                    )
+                    .forward("initial_publication_bind", body)
                     .await
                     .map_err(|_| Error::Reconcile)?;
                 let completed = clock();

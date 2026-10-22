@@ -159,9 +159,26 @@ impl<T: AuthenticatedTransport> GlobalPassportIssuance<T> {
     /// Submit exactly one original durable holder request. Unknown outcomes
     /// consume this continuation, never replay the issuer's mutation. The blind
     /// answer remains public bytes until original Wallet signature verification.
-    pub async fn issue(
+    pub async fn issue(&mut self, request: Vec<u8>, clock: impl FnMut() -> u64) -> Result<Vec<u8>> {
+        self.submit(request, None, clock).await
+    }
+
+    /// The birth passport (Q5) during a one-ceremony registration: `signature` is the bound
+    /// birth device key's signature (purpose `WalletBirthPassport`) over the hash of this
+    /// exact `request`. Accepted only under this session's birth grant, at most once.
+    pub async fn issue_birth(
         &mut self,
         request: Vec<u8>,
+        signature: [u8; 64],
+        clock: impl FnMut() -> u64,
+    ) -> Result<Vec<u8>> {
+        self.submit(request, Some(signature), clock).await
+    }
+
+    async fn submit(
+        &mut self,
+        request: Vec<u8>,
+        birth_signature: Option<[u8; 64]>,
         mut clock: impl FnMut() -> u64,
     ) -> Result<Vec<u8>> {
         if self.submitted || request.is_empty() || request.len() > 1_048_576 {
@@ -172,14 +189,13 @@ impl<T: AuthenticatedTransport> GlobalPassportIssuance<T> {
             if self.lease.passport_current(&mut clock).await? != self.issuer {
                 return Err(Error::Unauthorized);
             }
+            let mut body = json!({"challenge":self.challenge,"request":request});
+            if let Some(signature) = birth_signature {
+                body["birth_signature"] = json!(signature.to_vec());
+            }
             let response = self
                 .lease
-                .passport_call(
-                    "passport_issue",
-                    json!({"challenge":self.challenge,"request":request}),
-                    true,
-                    &mut clock,
-                )
+                .passport_call("passport_issue", body, true, &mut clock)
                 .await?;
             let answer = bytes(&response, "bytes")?;
             if self

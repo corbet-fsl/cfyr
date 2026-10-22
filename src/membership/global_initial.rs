@@ -20,6 +20,8 @@ pub struct GlobalInitialCreationLease<T> {
     wallet: GlobalWalletLease<T>,
     seed: [u8; 32],
     publication: [u8; 32],
+    /// Birth genesis evidence sent with every bind of a one-ceremony registration.
+    evidence: Option<Vec<u8>>,
 }
 
 impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
@@ -35,11 +37,36 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         if seed == [0; 32] || publication == [0; 32] {
             return Err(Error::Invalid);
         }
-        self.bind_initial(seed, publication, &mut clock).await?;
+        self.bind_initial(seed, publication, None, &mut clock)
+            .await?;
         Ok(GlobalInitialCreationLease {
             wallet: self,
             seed,
             publication,
+            evidence: None,
+        })
+    }
+
+    /// [`Self::bind_initial_creation`] of a one-ceremony registration: the bind carries the
+    /// wallet birth genesis evidence (`cchr::BirthGenesisEvidence` bytes) in place of a
+    /// passkey assertion, and the wallet verifies it for this account and `seed`.
+    pub async fn bind_birth_creation(
+        mut self,
+        seed: [u8; 32],
+        publication: [u8; 32],
+        evidence: Vec<u8>,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<GlobalInitialCreationLease<T>> {
+        if seed == [0; 32] || publication == [0; 32] || evidence.is_empty() {
+            return Err(Error::Invalid);
+        }
+        self.bind_initial(seed, publication, Some(&evidence), &mut clock)
+            .await?;
+        Ok(GlobalInitialCreationLease {
+            wallet: self,
+            seed,
+            publication,
+            evidence: Some(evidence),
         })
     }
 }
@@ -65,7 +92,12 @@ impl<T: AuthenticatedTransport> GlobalInitialCreationLease<T> {
     /// Cancellation or any uncertain result permanently fences this handle.
     pub async fn refresh(&mut self, mut clock: impl FnMut() -> u64) -> Result<()> {
         self.wallet
-            .bind_initial(self.seed, self.publication, &mut clock)
+            .bind_initial(
+                self.seed,
+                self.publication,
+                self.evidence.as_deref(),
+                &mut clock,
+            )
             .await
     }
     /// Final local-session/clock fence immediately after a fresh bind. It does
