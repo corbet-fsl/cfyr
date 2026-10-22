@@ -15,7 +15,10 @@ pub use accounting::{
 mod global;
 mod global_initial;
 pub use certificate::{CertifiedMembershipLease, InitialCreationLease, RegisteredCertificateLease};
-pub use global::{GlobalPassportIssuance, GlobalStampIssuance, GlobalWalletLease, LiveGlobalWallet};
+pub use global::{
+    GlobalPassportIssuance, GlobalStampIssuance, GlobalWalletLease, LiveGlobalWallet,
+    WalletBirthStatement,
+};
 pub use global_initial::GlobalInitialCreationLease;
 
 use std::{

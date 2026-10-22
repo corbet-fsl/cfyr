@@ -25,8 +25,9 @@ struct Challenge {
 struct Completed {
     user: String,
     certificate: Option<Vec<u8>>,
-    /// The wallet's birth session (one-ceremony registration, C1). Accepted on the wire and
-    /// not yet adopted: until the Foyer adopts it, it is never stored and simply expires.
+    /// The wallet's birth session (one-ceremony registration, C1). cvld's client removes it
+    /// before this answer is parsed (forwarding drops it; the trusted global finish adopts
+    /// it), so a bearer is never kept here.
     #[serde(default)]
     #[allow(dead_code)]
     session: Option<serde::de::IgnoredAny>,
