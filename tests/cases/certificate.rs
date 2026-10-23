@@ -115,7 +115,8 @@ impl TlsIngress {
                                 | "/v1/initial_registration_begin" | "/v1/initial_creation"
                                 | "/v1/initial_publication_bind" | "/v1/presentation_challenge"
                                 | "/v1/account_credential_issue"
-                                | "/v1/device_session_begin" | "/v1/device_session_finish" | "/v1/device_join"));
+                                | "/v1/device_session_begin" | "/v1/device_session_finish" | "/v1/device_join"
+                                | "/v1/device_add" | "/v1/device_activate"));
                             // Fixed, test-owned virtual-host ingress route. It never
                             // takes the upstream URL or Host from request JSON.
                             // The WebAuthn vault realm stays the original VAULT;
@@ -912,6 +913,15 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
         Err(Error::Invalid)
     ));
     let user = foyer.device_join(join).await.unwrap();
+    // The pairing steps are trusted owner actions as well, and a malformed request is refused.
+    for action in ["device_add", "device_activate"] {
+        assert!(matches!(
+            foyer.call(action, json!({})).await,
+            Err(Error::Invalid)
+        ));
+    }
+    assert!(foyer.device_add(json!({})).await.is_err());
+    assert!(foyer.device_activate(json!({})).await.is_err());
     // Silent device session through the same held TLS Foyer.
     let nonce = foyer.begin_device_session().await.unwrap();
     let signature = device_sign(&mut device, &nonce.message("alpha")).await;

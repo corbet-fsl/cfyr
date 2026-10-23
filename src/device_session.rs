@@ -5,7 +5,8 @@ use serde::Deserialize;
 
 /// The join protocol's public constants and signed message, from the original server.
 pub use cvld::device_session::{
-    GARDEN_ACTION, JOIN_ACTION, garden_payload, join_message, join_payload,
+    ACTIVATE_ACTION, ADD_ACTION, GARDEN_ACTION, JOIN_ACTION, garden_payload, join_message,
+    join_payload, pairing_payload,
 };
 
 /// The original server's one-use nonce. The signed message is rebuilt with
@@ -53,6 +54,28 @@ impl<T: Transport> Foyer<T> {
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
             .ok_or(Error::Reconcile)
+    }
+
+    /// Pairing step one (`device_add`): register a further device key PENDING, which grants
+    /// nothing until [`Foyer::device_activate`]. The request carries the passport
+    /// presentation, the confirmation stamp covering [`ADD_ACTION`] with
+    /// [`pairing_payload`] of exactly this key, and the new key's signature over
+    /// [`join_message`]. A trusted owner action, sent here and never through the shell
+    /// forwarding of [`Foyer::call`].
+    pub async fn device_add(&mut self, request: serde_json::Value) -> Result<()> {
+        self.pairing_step("device_add", request).await
+    }
+
+    /// Pairing step two (`device_activate`): make the pending key ACTIVE once its lineage
+    /// revision is published. Same request shape as [`Foyer::device_add`], with a stamp
+    /// covering [`ACTIVATE_ACTION`].
+    pub async fn device_activate(&mut self, request: serde_json::Value) -> Result<()> {
+        self.pairing_step("device_activate", request).await
+    }
+
+    async fn pairing_step(&mut self, action: &str, request: serde_json::Value) -> Result<()> {
+        let mut retained = self.shared.session.lock().await;
+        retained.client.call(action, request).await.map(|_| ())
     }
 }
 
