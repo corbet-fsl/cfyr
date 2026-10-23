@@ -116,10 +116,15 @@ impl<T: AuthenticatedTransport> AccountOwner<'_, T> {
                 error
             }
         };
+        // The one certain answer after sending: the owner refused before its
+        // commitment because the request window had elapsed (409, reason expired).
         let response = Abortable::new(self.lease.held.client.forward(action, input), registration)
             .await
             .map_err(|_| after_send(Error::Unavailable))?
-            .map_err(after_send)?;
+            .map_err(|error| match error {
+                Error::Expired => error,
+                error => after_send(error),
+            })?;
         self.lease
             .refresh_observation(clock)
             .await
