@@ -16,8 +16,8 @@ mod global;
 mod global_initial;
 pub use certificate::{CertifiedMembershipLease, InitialCreationLease, RegisteredCertificateLease};
 pub use global::{
-    GlobalPassportIssuance, GlobalStampIssuance, GlobalWalletLease, LiveGlobalWallet,
-    WalletBirthStatement,
+    CLOCK_SKEW_SECONDS, GlobalPassportIssuance, GlobalStampIssuance, GlobalWalletLease,
+    LiveGlobalWallet, WalletBirthStatement,
 };
 pub use global_initial::GlobalInitialCreationLease;
 

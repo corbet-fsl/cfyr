@@ -10,6 +10,8 @@ pub(super) struct InitialResponse {
     pub(super) seed: [u8; 32],
     pub(super) publication: Option<[u8; 32]>,
     pub(super) checked_at: u64,
+    #[serde(default)]
+    pub(super) nonce: Option<[u8; 32]>,
 }
 
 /// A retained original wallet session whose latest operation was the genuine

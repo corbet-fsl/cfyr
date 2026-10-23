@@ -393,7 +393,15 @@ struct TlsIngress {
     observations: Arc<AtomicUsize>,
     gate: Arc<Gate>,
     mutation: Arc<Gate>,
+    replay: Arc<Replay>,
     task: tokio::task::JoinHandle<()>,
+}
+/// Answers the next `initial_publication_bind` with the last genuine answer the server gave
+/// to an earlier bind (a replayed old response), once, when enabled.
+#[derive(Default)]
+struct Replay {
+    enabled: AtomicBool,
+    last: std::sync::Mutex<Option<Vec<u8>>>,
 }
 impl Drop for TlsIngress {
     fn drop(&mut self) {
@@ -429,6 +437,8 @@ impl TlsIngress {
         let paused = gate.clone();
         let mutation = Arc::new(Gate::default());
         let delayed = mutation.clone();
+        let replay = Arc::new(Replay::default());
+        let replaying = replay.clone();
         let task = tokio::spawn(async move {
             let acceptor = TlsAcceptor::from(Arc::new(config));
             let mut active = tokio::task::JoinSet::new();
@@ -441,6 +451,7 @@ impl TlsIngress {
                         let observed = observed.clone();
                         let paused = paused.clone();
                         let delayed = delayed.clone();
+                        let replaying = replaying.clone();
                         active.spawn(async move {
                             let Ok(mut tls) = acceptor.accept(io).await else { return; };
                             let mut bytes = Vec::new();
@@ -466,7 +477,7 @@ impl TlsIngress {
                                     }
                                 }
                             };
-                            assert!(matches!(path.as_str(), "/v1/register_begin" | "/v1/register_finish"
+                            assert!(matches!(path.as_str(), "/v1/register_begin" | "/v1/register_finish" | "/v1/wallet_register_finish"
                                 | "/v1/login_discoverable_begin" | "/v1/login_finish" | "/v1/logout"
                                 | "/v1/global_public" | "/v1/passkey_list"
                                 | "/v1/passkey_add" | "/v1/passkey_revoke" | "/v1/step_up_begin"
@@ -490,7 +501,14 @@ impl TlsIngress {
                             }
                             let response = request.body(body).send().await.unwrap();
                             let status = response.status().as_u16();
-                            let body = response.bytes().await.unwrap();
+                            let mut body = response.bytes().await.unwrap().to_vec();
+                            if path == "/v1/initial_publication_bind" && status == 200 {
+                                let mut last = replaying.last.lock().unwrap();
+                                match last.clone() {
+                                    Some(old) if replaying.enabled.swap(false, Ordering::SeqCst) => body = old,
+                                    _ => *last = Some(body.clone()),
+                                }
+                            }
                             // Preserve original status/body/bearer/signed material and
                             // server checked_at. Only reply timing can be gated.
                             if path == "/v1/passkey_list" {
@@ -502,7 +520,7 @@ impl TlsIngress {
                             }
                             let target = match path.as_str() {
                                 "/v1/global_initial_registration_continue" => 1,
-                                "/v1/register_finish" => 2,
+                                "/v1/register_finish" | "/v1/wallet_register_finish" => 2,
                                 "/v1/initial_publication_bind" => 3,
                                 "/v1/wallet_device_keys" => 4,
                                 "/v1/passkey_certificate" => 5,
@@ -531,6 +549,7 @@ impl TlsIngress {
             observations,
             gate,
             mutation,
+            replay,
             task,
         }
     }

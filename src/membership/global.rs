@@ -131,6 +131,11 @@ impl<T: AuthenticatedTransport> LiveGlobalWallet<T> {
     }
 }
 
+/// Largest difference between the device clock and the wallet's own time that a bind
+/// accepts: the platform's existing clock-skew tolerance. Beyond it the bind fails with
+/// [`Error::Clock`] (check the device time), never as an unknown outcome.
+pub const CLOCK_SKEW_SECONDS: u64 = cpsd::STAMP_CLOCK_SKEW_SECONDS;
+
 impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
     pub(super) async fn bind_initial(
         &mut self,
@@ -139,7 +144,11 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         evidence: Option<&[u8]>,
         clock: &mut impl FnMut() -> u64,
     ) -> Result<()> {
-        let mut body = serde_json::json!({"seed":seed,"publication":publication});
+        // Freshness is this bind's own nonce echoed in the answer, not the device clock:
+        // an earlier answer replayed for the same seed and publication cannot carry it.
+        let mut nonce = [0u8; 32];
+        getrandom::fill(&mut nonce).map_err(|_| Error::Unavailable)?;
+        let mut body = serde_json::json!({"seed":seed,"publication":publication,"nonce":nonce});
         if let Some(evidence) = evidence {
             body["evidence"] = serde_json::json!(evidence);
         }
@@ -176,14 +185,19 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
                 let completed = clock();
                 let actual: super::global_initial::InitialResponse =
                     serde_json::from_value(response).map_err(|_| Error::Reconcile)?;
+                // Device times are ordered only with device times and server times only
+                // with server times; the two clocks meet only in the skew tolerance.
                 if actual.seed != seed
                     || actual.publication != Some(publication)
-                    || actual.checked_at < started
-                    || completed < observed.max(actual.checked_at)
-                    || completed >= self.expires
+                    || actual.nonce != Some(nonce)
+                    || completed < observed
+                    || actual.checked_at >= self.expires
                     || shared.is_closed()
                 {
                     return Err(Error::Reconcile);
+                }
+                if completed.abs_diff(actual.checked_at) > CLOCK_SKEW_SECONDS {
+                    return Err(Error::Clock);
                 }
                 Ok(completed)
             },
