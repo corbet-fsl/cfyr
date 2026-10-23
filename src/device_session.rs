@@ -5,8 +5,8 @@ use serde::Deserialize;
 
 /// The join protocol's public constants and signed message, from the original server.
 pub use cvld::device_session::{
-    ACTIVATE_ACTION, ADD_ACTION, GARDEN_ACTION, JOIN_ACTION, garden_payload, join_message,
-    join_payload, pairing_payload,
+    ACTIVATE_ACTION, ADD_ACTION, GARDEN_ACTION, JOIN_ACTION, PAIR_ACTION, garden_payload,
+    join_message, join_payload, pair_payload, pairing_message,
 };
 
 /// The original server's one-use nonce. The signed message is rebuilt with
@@ -58,17 +58,17 @@ impl<T: Transport> Foyer<T> {
 
     /// Pairing step one (`device_add`): register a further device key PENDING, which grants
     /// nothing until [`Foyer::device_activate`]. The request carries the passport
-    /// presentation, the confirmation stamp covering [`ADD_ACTION`] with
-    /// [`pairing_payload`] of exactly this key, and the new key's signature over
-    /// [`join_message`]. A trusted owner action, sent here and never through the shell
-    /// forwarding of [`Foyer::call`].
+    /// presentation, the community's ONE pairing stamp slot ([`PAIR_ACTION`] with
+    /// [`pair_payload`]), the pairing session and the new key's signature over
+    /// [`pairing_message`] of [`ADD_ACTION`]. A trusted owner action, sent here and never
+    /// through the shell forwarding of [`Foyer::call`].
     pub async fn device_add(&mut self, request: serde_json::Value) -> Result<()> {
         self.pairing_step("device_add", request).await
     }
 
-    /// Pairing step two (`device_activate`): make the pending key ACTIVE once its lineage
-    /// revision is published. Same request shape as [`Foyer::device_add`], with a stamp
-    /// covering [`ACTIVATE_ACTION`].
+    /// Pairing step two (`device_activate`): make the approved PENDING key ACTIVE once its
+    /// lineage revision is published. No stamp: the passport presentation and the new key's
+    /// signature over [`pairing_message`] of [`ACTIVATE_ACTION`].
     pub async fn device_activate(&mut self, request: serde_json::Value) -> Result<()> {
         self.pairing_step("device_activate", request).await
     }

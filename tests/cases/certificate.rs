@@ -1164,47 +1164,71 @@ async fn one_stamp_pairs_a_further_device_key_pending_then_active() {
         .await
         .unwrap();
 
-    // The new device holds a key of its own; ONE stamp covers BOTH pairing steps for it.
+    // The new device holds a key of its own; ONE stamp slot (the community's) covers its
+    // pairing, and only `device_add` presents it.
     let (mut second, second_key, _) = keys_device_with("alpha", &pseudonym, 28, 8).await;
-    let action = |kind: &str, key: &[u8; 32], salt: u8| {
+    let pair = |key: &[u8; 32], session: u8, salt: u8| {
         cpsd::StampAction::new(
-            cpsd::ActionKind::new(kind).unwrap(),
-            cpsd::PayloadDigest::from_bytes(crate::device_session::pairing_payload(kind, key)),
+            cpsd::ActionKind::new(crate::device_session::PAIR_ACTION).unwrap(),
+            cpsd::PayloadDigest::from_bytes(crate::device_session::pair_payload(
+                "alpha",
+                &pseudonym,
+                key,
+                &[session; 32],
+                None,
+            )),
             cpsd::StampSalt::from_bytes([salt; 32]),
         )
     };
-    let add = action(crate::device_session::ADD_ACTION, &second_key, 21);
-    let activate = action(crate::device_session::ACTIVATE_ACTION, &second_key, 22);
-    issue_stamp(
-        &global,
-        &mut member,
-        &mut holder,
-        &[
-            (scope.clone(), add.clone()),
-            (scope.clone(), activate.clone()),
-        ],
-    )
-    .await;
-    // The pairing request of one step: fresh challenge, passport, the given stamp action, and
-    // the new key's possession signature over that same challenge.
-    let step = async |holder: &mut cpsd::OpaqueHolder,
-                      device: &mut KeysDevice,
-                      key: [u8; 32],
-                      presented: &cpsd::StampAction,
-                      salt: u8| {
+    let add = pair(&second_key, 5, 21);
+    issue_stamp(&global, &mut member, &mut holder, &[(scope.clone(), add.clone())]).await;
+    // `device_add`: fresh challenge, passport, the stamp slot and the new key's possession
+    // signature of the ADD step over that same challenge.
+    let add_step = async |holder: &mut cpsd::OpaqueHolder,
+                          device: &mut KeysDevice,
+                          key: [u8; 32],
+                          presented: &cpsd::StampAction,
+                          session: u8,
+                          salt: u8| {
         let (challenge, proof) = passport_over_challenge(&anonymous, holder, &feed.key_ring).await;
         let stamp = holder
             .present_stamp(&mut cpsd::rand::rngs::OsRng, &scope, presented, NOW)
             .unwrap();
-        let salt = [salt; 32];
         json!({
             "passport": {"challenge": challenge.challenge, "proof": proof},
             "stamp": stamp.to_bytes(),
-            "salt": salt,
+            "salt": vec![salt; 32],
+            "device_key": key,
+            "session": vec![session; 32],
+            "revision": null,
+            "signature": device_sign(
+                device,
+                &crate::device_session::pairing_message(
+                    crate::device_session::ADD_ACTION,
+                    "alpha",
+                    &challenge.challenge,
+                    &key,
+                ),
+            )
+            .await,
+        })
+    };
+    // `device_activate`: no stamp, only the passport and the ACTIVATE step's signature.
+    let activate_step = async |holder: &mut cpsd::OpaqueHolder,
+                               device: &mut KeysDevice,
+                               key: [u8; 32]| {
+        let (challenge, proof) = passport_over_challenge(&anonymous, holder, &feed.key_ring).await;
+        json!({
+            "passport": {"challenge": challenge.challenge, "proof": proof},
             "device_key": key,
             "signature": device_sign(
                 device,
-                &crate::device_session::join_message("alpha", &challenge.challenge, &key),
+                &crate::device_session::pairing_message(
+                    crate::device_session::ACTIVATE_ACTION,
+                    "alpha",
+                    &challenge.challenge,
+                    &key,
+                ),
             )
             .await,
         })
@@ -1218,51 +1242,33 @@ async fn one_stamp_pairs_a_further_device_key_pending_then_active() {
             .await
     };
 
-    // Cross-use of the one stamp is refused: the add slot never activates, and a stamp for
-    // this key never pairs another key.
-    let early = step(&mut holder, &mut second, second_key, &add, 21).await;
-    assert!(
-        foyer.device_activate(early).await.is_err(),
-        "the add stamp is no activation"
-    );
+    // Cross-use is refused: the stamp covers exactly one key, and the join's stamp is no
+    // pairing stamp.
     let (mut third, third_key, _) = keys_device_with("alpha", &pseudonym, 29, 9).await;
-    let stolen = step(&mut holder, &mut third, third_key, &add, 21).await;
+    let stolen = add_step(&mut holder, &mut third, third_key, &add, 5, 21).await;
     let stolen = foyer.device_add(stolen).await;
-    assert!(
-        stolen.is_err(),
-        "the stamp covers exactly one key: {stolen:?}"
-    );
-    // The join's stamp is no pairing stamp.
-    let replay = step(&mut holder, &mut second, second_key, &join_action, 10).await;
-    assert!(
-        foyer.device_add(replay).await.is_err(),
-        "a join stamp never adds a key"
-    );
-    // Activating a key that was never added is refused too.
-    let early = step(&mut holder, &mut second, second_key, &activate, 22).await;
-    assert!(
-        foyer.device_activate(early).await.is_err(),
-        "no activation before the add"
-    );
+    assert!(stolen.is_err(), "the stamp covers exactly one key: {stolen:?}");
+    let replay = add_step(&mut holder, &mut second, second_key, &join_action, 5, 10).await;
+    assert!(foyer.device_add(replay).await.is_err(), "a join stamp never adds a key");
+    // Activating a key that was never added is refused: it needs the approved PENDING key.
+    let early = activate_step(&mut holder, &mut second, second_key).await;
+    assert!(foyer.device_activate(early).await.is_err(), "no activation before the add");
 
     // Step one registers the key PENDING: it grants nothing, no session opens.
-    let request = step(&mut holder, &mut second, second_key, &add, 21).await;
+    let request = add_step(&mut holder, &mut second, second_key, &add, 5, 21).await;
     foyer.device_add(request).await.unwrap();
-    assert!(
-        try_session(&mut second, second_key).await.is_err(),
-        "a pending key has no session"
-    );
-    // A retry of the same step with the same stamp is idempotent (a lost answer costs nothing).
-    let request = step(&mut holder, &mut second, second_key, &add, 21).await;
+    assert!(try_session(&mut second, second_key).await.is_err(), "a pending key has no session");
+    // A retry of the same step with the same stamp is idempotent while PENDING.
+    let request = add_step(&mut holder, &mut second, second_key, &add, 5, 21).await;
     foyer.device_add(request).await.unwrap();
     assert!(
         try_session(&mut second, second_key).await.is_err(),
         "still pending without an activate"
     );
 
-    // Step two, with the SAME stamp's second slot, makes it ACTIVE: its sessions work, and the
-    // first device keeps working.
-    let request = step(&mut holder, &mut second, second_key, &activate, 22).await;
+    // Step two takes no stamp and makes it ACTIVE: its sessions work, and the first device
+    // keeps working.
+    let request = activate_step(&mut holder, &mut second, second_key).await;
     foyer.device_activate(request).await.unwrap();
     try_session(&mut second, second_key).await.unwrap();
     try_session(&mut first, first_key).await.unwrap();
