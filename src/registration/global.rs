@@ -191,13 +191,8 @@ impl<T: AuthenticatedTransport> Foyer<T> {
     }
 
     /// Submit only exact durably retained global finish data. Success conveys no
-    /// eligibility, certificate or Keys authority; lost replies reconcile through actual
-    /// same-key authentication and original initial provenance.
-    ///
-    /// When the wallet answers with its birth session (one-ceremony registration, C1), this
-    /// Foyer adopts it as its login of the just-registered credential, exactly as a login
-    /// would: it carries the birth grant for the account's first device bind, genesis
-    /// statement, stamp and passport. Without one the Foyer stays logged out.
+    /// login, eligibility, certificate or Keys authority; lost replies reconcile
+    /// through actual same-key authentication and original initial provenance.
     pub async fn resume_global_initial_registration(
         &mut self,
         continuation: GlobalFinishContinuation,
@@ -225,15 +220,10 @@ impl<T: AuthenticatedTransport> Foyer<T> {
                 if observed < sending || observed >= wire.expires_at || shared.is_closed() {
                     return Err(Error::Unauthorized);
                 }
-                // A birth session replaces this logged-out Foyer's session: earlier stamps
-                // of this owner end here, as before any login.
-                held.authentication = held
-                    .authentication
-                    .checked_add(1)
-                    .ok_or(Error::Unavailable)?;
-                let (response, session) = held
+                let response = held
                     .client
-                    .finish_registration(
+                    .forward(
+                        "register_finish",
                         json!({"ceremony":wire.ceremony,"credential":wire.credential}),
                     )
                     .await
@@ -245,22 +235,11 @@ impl<T: AuthenticatedTransport> Foyer<T> {
                     || completed >= wire.expires_at
                     || shared.is_closed()
                     || held.info.is_some()
-                    || held.authentication != authentication + 1
+                    || held.authentication != authentication
                     || actual.user != wire.account
                     || actual.certificate.is_some()
                 {
                     return Err(Error::Reconcile);
-                }
-                if let Some(info) = session {
-                    if info.user != wire.account
-                        || info.role != "member"
-                        || completed >= info.expires
-                    {
-                        return Err(Error::Reconcile);
-                    }
-                    held.info = Some(info);
-                    held.login_credential = Some(wire.raw_id.clone());
-                    held.device_session = false;
                 }
                 Ok(())
             },

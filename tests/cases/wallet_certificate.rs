@@ -408,6 +408,3 @@ async fn another_current_policy_or_same_account_noncurrent_key_cannot_join_the_w
     // key does not acquire the original first-key immutable creation binding.
     assert!(certified.initial_creation(|| NOW).await.is_err());
 }
-
-#[path = "birth.rs"]
-mod birth;

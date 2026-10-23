@@ -476,8 +476,7 @@ impl TlsIngress {
                                 | "/v1/wallet_trust_changes" | "/v1/wallet_device_keys"
                                 | "/v1/wallet_device_authorize" | "/v1/passkey_certificate"
                                 | "/v1/development_gate" | "/v1/passport_challenge" | "/v1/passport_issue"
-                                | "/v1/session_fork" | "/v1/wallet_birth_genesis" | "/v1/stamp_challenge"
-                                | "/v1/stamp_issue"));
+                                | "/v1/session_fork"));
                             // Fixed, test-owned virtual-host ingress route. It never
                             // takes the upstream URL or Host from request JSON.
                             // The WebAuthn vault realm stays the original VAULT;
@@ -545,6 +544,3 @@ mod certificates;
 
 #[path = "global_passport.rs"]
 mod passport;
-
-#[path = "birth_stamp.rs"]
-mod birth_stamp;

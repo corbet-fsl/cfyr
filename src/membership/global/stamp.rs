@@ -83,26 +83,6 @@ impl<T: AuthenticatedTransport> GlobalStampIssuance<T> {
         &mut self,
         request: Vec<u8>,
         assertion: Value,
-        clock: impl FnMut() -> u64,
-    ) -> Result<Vec<u8>> {
-        self.submit(request, Some(assertion), clock).await
-    }
-
-    /// The account's first stamp during a one-ceremony registration (C5): submitted without
-    /// a passkey assertion, under this session's birth grant. The wallet issues it at most
-    /// once and only while no stamp was issued for the account; the stamp is byte-identical.
-    pub async fn issue_birth(
-        &mut self,
-        request: Vec<u8>,
-        clock: impl FnMut() -> u64,
-    ) -> Result<Vec<u8>> {
-        self.submit(request, None, clock).await
-    }
-
-    async fn submit(
-        &mut self,
-        request: Vec<u8>,
-        assertion: Option<Value>,
         mut clock: impl FnMut() -> u64,
     ) -> Result<Vec<u8>> {
         if self.submitted || request.is_empty() || request.len() > 1_048_576 {
@@ -113,13 +93,14 @@ impl<T: AuthenticatedTransport> GlobalStampIssuance<T> {
             if self.lease.passport_current(&mut clock).await? != self.issuer {
                 return Err(Error::Unauthorized);
             }
-            let mut body = json!({"challenge":self.challenge,"request":request});
-            if let Some(assertion) = assertion {
-                body["assertion"] = assertion;
-            }
             let response = self
                 .lease
-                .passport_call("stamp_issue", body, true, &mut clock)
+                .passport_call(
+                    "stamp_issue",
+                    json!({"challenge":self.challenge,"request":request,"assertion":assertion}),
+                    true,
+                    &mut clock,
+                )
                 .await?;
             let answer = bytes(&response, "bytes")?;
             if self

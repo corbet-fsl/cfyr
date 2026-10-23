@@ -46,20 +46,7 @@ async fn registered() -> Fixture {
         .resume_global_initial_registration(finish, || NOW)
         .await
         .unwrap();
-    // C1: the finish adopted the wallet's birth session of exactly this account; a later
-    // login replaces it as any login does.
-    assert_eq!(
-        foyer
-            .shared
-            .session
-            .lock()
-            .await
-            .info
-            .as_ref()
-            .unwrap()
-            .user,
-        user
-    );
+    assert!(foyer.shared.session.lock().await.info.is_none());
     assert_eq!(login(&mut foyer, &mut keys).await, original_id);
     Fixture {
         tls,
@@ -153,11 +140,7 @@ async fn exact_public_finish_reopens_before_send_and_lost_acceptance_requires_re
             .resume_global_initial_registration(retained, || NOW)
             .await;
         assert_eq!(result.is_ok(), !uncertain);
-        // Only an accepted finish carries the birth session; a lost acceptance needs a login.
-        assert_eq!(
-            restarted.shared.session.lock().await.info.is_some(),
-            !uncertain
-        );
+        assert!(restarted.shared.session.lock().await.info.is_none());
         assert_eq!(login(&mut restarted, &mut keys).await, id);
         let lease = restarted
             .live_global_wallet(tls.origin.clone())
