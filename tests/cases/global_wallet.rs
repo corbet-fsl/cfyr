@@ -212,6 +212,26 @@ async fn wallet_stamp_trust_comes_from_the_signed_global_status_of_this_session(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_stamp_epoch_a_device_expects_is_the_signed_global_statuss() {
+    let f = Fixture::on(configured_wallet(100).await).await;
+    let mut lease = f.live().observe_lease(|| NOW).await.unwrap();
+    let published = lease.stamp_trust(|| NOW).await.unwrap().epoch().unwrap();
+    let mut issuance = f
+        .live()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap()
+        .stamp_challenge(|| NOW)
+        .await
+        .unwrap();
+    // Read through the same session, verified under the global key ring, never from the
+    // stamp reply: a wallet that signed another epoch for this member would not match it.
+    assert_eq!(issuance.verified_epoch(|| NOW).await.unwrap(), published);
+    // The same time rules as every read through the session.
+    assert!(issuance.verified_epoch(|| u64::MAX).await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_fork_lets_two_leases_hold_one_wallet_session_family_at_once() {
     let mut f = Fixture::new().await;
     // Nothing to fork without a passkey session.

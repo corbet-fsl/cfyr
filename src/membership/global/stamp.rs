@@ -76,6 +76,21 @@ impl<T: AuthenticatedTransport> GlobalStampIssuance<T> {
         Ok(result)
     }
 
+    /// The stamp epoch of the wallet's signed global status, read through this same
+    /// retained session and verified under the global key ring at the device's time
+    /// ([`GlobalWalletLease::stamp_trust`]). This is the epoch a device expects on the
+    /// stamp it is issued (`finish_stamp`): it is identical for every member and never
+    /// comes from the wallet's stamp reply, whose epoch a dishonest wallet could vary per
+    /// member to tag one (every presentation reveals it). Read it after the answer
+    /// arrived, so it is the epoch the wallet signed under.
+    pub async fn verified_epoch(&mut self, clock: impl FnMut() -> u64) -> Result<u64> {
+        self.lease
+            .stamp_trust(clock)
+            .await?
+            .epoch()
+            .ok_or(Error::Reconcile)
+    }
+
     /// Submit exactly one durable stamp request with its one passkey assertion. An unknown
     /// outcome consumes this continuation; the blind answer stays public bytes until Wallet
     /// verifies its signature.

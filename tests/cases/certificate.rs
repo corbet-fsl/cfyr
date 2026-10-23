@@ -708,8 +708,15 @@ async fn issue_stamp(
             .unwrap(),
     )
     .unwrap();
+    // The device expects the epoch of the signed global status, not one from the reply.
+    let public: cvld::api::GlobalPublic =
+        serde_json::from_value(wallet.call("global_public", json!({})).await.unwrap()).unwrap();
+    let epoch = cchr::global_stamp_trust(&public.key_ring, &public.status, NOW)
+        .unwrap()
+        .epoch()
+        .unwrap();
     holder
-        .finish_stamp(&cpsd::BlindStamp::from_bytes(&blind.bytes).unwrap(), NOW)
+        .finish_stamp(&cpsd::BlindStamp::from_bytes(&blind.bytes).unwrap(), epoch, NOW)
         .unwrap();
 }
 
