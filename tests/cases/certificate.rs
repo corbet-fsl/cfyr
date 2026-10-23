@@ -765,7 +765,17 @@ type KeysDevice = ckmg::Keys<KeysStore, KeysClock, ckmg::SystemEntropy, KeysAuth
 
 /// The member's first community lineage made by Keys on the device, and its device key.
 async fn keys_device(community: &str, member: &str) -> (KeysDevice, [u8; 32], ckmg::Receipt) {
-    let prf = ckmg::passkey::PrfOutput::from_bytes(&[27; 32]).unwrap();
+    keys_device_with(community, member, 27, 7).await
+}
+
+/// Another device of the same member: its own PRF output and device identity, so its key differs.
+async fn keys_device_with(
+    community: &str,
+    member: &str,
+    prf_seed: u8,
+    device_seed: u8,
+) -> (KeysDevice, [u8; 32], ckmg::Receipt) {
+    let prf = ckmg::passkey::PrfOutput::from_bytes(&[prf_seed; 32]).unwrap();
     let binding = ckmg::Binding::new(community, member).unwrap();
     let mut keys = ckmg::Keys::new(
         KeysStore::default(),
@@ -777,7 +787,7 @@ async fn keys_device(community: &str, member: &str) -> (KeysDevice, [u8; 32], ck
         .create_scope(
             &prf,
             binding,
-            ckmg::DeviceInfo::new("fixture", &[7; 16]).unwrap(),
+            ckmg::DeviceInfo::new("fixture", &[device_seed; 16]).unwrap(),
             b"fixture",
         )
         .await
@@ -1002,6 +1012,199 @@ async fn device_key_member_reads_and_binds_initial_creation_without_a_passkey_ce
             .await
             .is_err()
     );
+}
+
+/// The community's one-use presentation challenge, answered by the member's passport.
+async fn passport_over_challenge(
+    anonymous: &cvld::cli::Client,
+    holder: &mut cpsd::OpaqueHolder,
+    key_ring: &[u8],
+) -> (cvld::api::PresentationChallenge, Vec<u8>) {
+    let challenge: cvld::api::PresentationChallenge = serde_json::from_value(
+        anonymous
+            .call("presentation_challenge", json!({}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let expected = cpsd::AuthenticatedCommunity::from_authenticated_origin(
+        cpsd::CommunityId::new("alpha").unwrap(),
+        csgn::KeyRing::from_cbor(key_ring).unwrap(),
+    );
+    let proof = holder
+        .present(
+            &mut cpsd::rand::rngs::OsRng,
+            &expected,
+            &challenge.request,
+            NOW,
+        )
+        .unwrap();
+    (challenge, proof.to_bytes())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_stamp_pairs_a_further_device_key_pending_then_active() {
+    let global = configured_wallet(100).await;
+    let (mut member, mut holder) = stamp_wallet(&global, 62).await;
+    let public: cvld::api::GlobalPublic = serde_json::from_value(
+        client(&global, WALLET, None)
+            .call("global_public", json!({}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let service = community("alpha", &public).await;
+    let tls = TlsIngress::new(&service).await;
+    let original = trust(&service, &tls).await;
+    let new_foyer = || async {
+        Foyer::with_trust(
+            crate::HttpClient::with_roots(
+                tls.origin.clone(),
+                "127.0.0.1".into(),
+                None,
+                std::slice::from_ref(&tls.root),
+            )
+            .unwrap(),
+            trust(&service, &tls).await,
+        )
+    };
+    let mut foyer = Foyer::with_trust(
+        crate::HttpClient::with_roots(
+            tls.origin.clone(),
+            "127.0.0.1".into(),
+            None,
+            std::slice::from_ref(&tls.root),
+        )
+        .unwrap(),
+        original,
+    );
+    let community_id = cpsd::CommunityId::new("alpha").unwrap();
+    let pseudonym = holder.pseudonym(&community_id).to_hex();
+    let anonymous = client(&service, HOST, None);
+    let feed: cvld::api::TrustFeed =
+        serde_json::from_value(anonymous.call("trust_feed", json!({})).await.unwrap()).unwrap();
+    let founding = csgn::verify_genesis(feed.genesis.as_deref().unwrap())
+        .unwrap()
+        .founding_key();
+    let fingerprint = csgn::community_fingerprint("alpha", Some(&founding));
+    let scope = cpsd::StampScope::of_community(community_id, Some(&fingerprint));
+
+    // The member's first device joins (one stamp), as in the device-key join.
+    let (mut first, first_key, _) = keys_device("alpha", &pseudonym).await;
+    let (seed, join_salt) = ([34; 32], [10; 32]);
+    let join_action = cpsd::StampAction::new(
+        cpsd::ActionKind::new(crate::device_session::JOIN_ACTION).unwrap(),
+        cpsd::PayloadDigest::from_bytes(crate::device_session::join_payload(&first_key, &seed)),
+        cpsd::StampSalt::from_bytes(join_salt),
+    );
+    issue_stamp(
+        &global,
+        &mut member,
+        &mut holder,
+        &[(scope.clone(), join_action.clone())],
+    )
+    .await;
+    let (challenge, proof) = passport_over_challenge(&anonymous, &mut holder, &feed.key_ring).await;
+    let stamp = holder
+        .present_stamp(&mut cpsd::rand::rngs::OsRng, &scope, &join_action, NOW)
+        .unwrap();
+    let user = foyer
+        .device_join(json!({
+            "passport": {"challenge": challenge.challenge, "proof": proof},
+            "stamp": stamp.to_bytes(),
+            "salt": join_salt,
+            "device_key": first_key,
+            "seed": seed,
+            "signature": device_sign(
+                &mut first,
+                &crate::device_session::join_message("alpha", &challenge.challenge, &first_key),
+            )
+            .await,
+        }))
+        .await
+        .unwrap();
+
+    // The new device holds a key of its own; ONE stamp covers BOTH pairing steps for it.
+    let (mut second, second_key, _) = keys_device_with("alpha", &pseudonym, 28, 8).await;
+    let action = |kind: &str, key: &[u8; 32], salt: u8| {
+        cpsd::StampAction::new(
+            cpsd::ActionKind::new(kind).unwrap(),
+            cpsd::PayloadDigest::from_bytes(crate::device_session::pairing_payload(kind, key)),
+            cpsd::StampSalt::from_bytes([salt; 32]),
+        )
+    };
+    let add = action(crate::device_session::ADD_ACTION, &second_key, 21);
+    let activate = action(crate::device_session::ACTIVATE_ACTION, &second_key, 22);
+    issue_stamp(
+        &global,
+        &mut member,
+        &mut holder,
+        &[(scope.clone(), add.clone()), (scope.clone(), activate.clone())],
+    )
+    .await;
+    // The pairing request of one step: fresh challenge, passport, the given stamp action, and
+    // the new key's possession signature over that same challenge.
+    let step = async |holder: &mut cpsd::OpaqueHolder,
+                      device: &mut KeysDevice,
+                      key: [u8; 32],
+                      presented: &cpsd::StampAction,
+                      salt: u8| {
+        let (challenge, proof) = passport_over_challenge(&anonymous, holder, &feed.key_ring).await;
+        let stamp = holder
+            .present_stamp(&mut cpsd::rand::rngs::OsRng, &scope, presented, NOW)
+            .unwrap();
+        let salt = [salt; 32];
+        json!({
+            "passport": {"challenge": challenge.challenge, "proof": proof},
+            "stamp": stamp.to_bytes(),
+            "salt": salt,
+            "device_key": key,
+            "signature": device_sign(
+                device,
+                &crate::device_session::join_message("alpha", &challenge.challenge, &key),
+            )
+            .await,
+        })
+    };
+    let try_session = async |device: &mut KeysDevice, key: [u8; 32]| {
+        let mut foyer = new_foyer().await;
+        let nonce = foyer.begin_device_session().await.unwrap();
+        let signature = device_sign(device, &nonce.message("alpha")).await;
+        foyer
+            .finish_device_session(nonce.nonce, &user, key, signature)
+            .await
+    };
+
+    // Cross-use of the one stamp is refused: the add slot never activates, and a stamp for
+    // this key never pairs another key.
+    let early = step(&mut holder, &mut second, second_key, &add, 21).await;
+    assert!(foyer.device_activate(early).await.is_err(), "the add stamp is no activation");
+    let (mut third, third_key, _) = keys_device_with("alpha", &pseudonym, 29, 9).await;
+    let stolen = step(&mut holder, &mut third, third_key, &add, 21).await;
+    let stolen = foyer.device_add(stolen).await;
+    assert!(stolen.is_err(), "the stamp covers exactly one key: {stolen:?}");
+    // The join's stamp is no pairing stamp.
+    let replay = step(&mut holder, &mut second, second_key, &join_action, 10).await;
+    assert!(foyer.device_add(replay).await.is_err(), "a join stamp never adds a key");
+    // Activating a key that was never added is refused too.
+    let early = step(&mut holder, &mut second, second_key, &activate, 22).await;
+    assert!(foyer.device_activate(early).await.is_err(), "no activation before the add");
+
+    // Step one registers the key PENDING: it grants nothing, no session opens.
+    let request = step(&mut holder, &mut second, second_key, &add, 21).await;
+    foyer.device_add(request).await.unwrap();
+    assert!(try_session(&mut second, second_key).await.is_err(), "a pending key has no session");
+    // A retry of the same step with the same stamp is idempotent (a lost answer costs nothing).
+    let request = step(&mut holder, &mut second, second_key, &add, 21).await;
+    foyer.device_add(request).await.unwrap();
+    assert!(try_session(&mut second, second_key).await.is_err(), "still pending without an activate");
+
+    // Step two, with the SAME stamp's second slot, makes it ACTIVE: its sessions work, and the
+    // first device keeps working.
+    let request = step(&mut holder, &mut second, second_key, &activate, 22).await;
+    foyer.device_activate(request).await.unwrap();
+    try_session(&mut second, second_key).await.unwrap();
+    try_session(&mut first, first_key).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
