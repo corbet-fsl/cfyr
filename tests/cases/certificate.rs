@@ -716,7 +716,11 @@ async fn issue_stamp(
         .epoch()
         .unwrap();
     holder
-        .finish_stamp(&cpsd::BlindStamp::from_bytes(&blind.bytes).unwrap(), epoch, NOW)
+        .finish_stamp(
+            &cpsd::BlindStamp::from_bytes(&blind.bytes).unwrap(),
+            epoch,
+            NOW,
+        )
         .unwrap();
 }
 
