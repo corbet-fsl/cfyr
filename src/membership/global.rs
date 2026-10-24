@@ -28,6 +28,7 @@ pub struct GlobalWalletLease<T> {
     expires: u64,
     origin: String,
     checked_at: Option<u64>,
+    received: u64,
     _pending: Pending<T>,
 }
 
@@ -73,7 +74,6 @@ impl<T: AuthenticatedTransport> LiveGlobalWallet<T> {
                 let sending = clock();
                 if info.role != "member"
                     || sending < started
-                    || sending >= expires
                     || shared.is_closed()
                 {
                     return Err(Error::Unauthorized);
@@ -84,7 +84,7 @@ impl<T: AuthenticatedTransport> LiveGlobalWallet<T> {
                     .forward("global_public", serde_json::json!({}))
                     .await?;
                 let global_checked = clock();
-                if global_checked < sending || global_checked >= expires || shared.is_closed() {
+                if global_checked < sending || shared.is_closed() {
                     return Err(Error::Unauthorized);
                 }
                 let response = held
@@ -92,7 +92,7 @@ impl<T: AuthenticatedTransport> LiveGlobalWallet<T> {
                     .forward("passkey_list", serde_json::json!({}))
                     .await?;
                 let completed = clock();
-                if completed < global_checked || completed >= expires || shared.is_closed() {
+                if completed < global_checked || shared.is_closed() {
                     return Err(Error::Unauthorized);
                 }
                 // Original generated response schema was checked by Client.
@@ -126,6 +126,7 @@ impl<T: AuthenticatedTransport> LiveGlobalWallet<T> {
             expires,
             origin: self.origin.clone(),
             checked_at: Some(completed),
+            received: completed,
             _pending: pending,
         })
     }
@@ -168,7 +169,7 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
                     .forward("global_public", serde_json::json!({}))
                     .await?;
                 let observed = clock();
-                if shared.is_closed() || observed < started || observed >= self.expires {
+                if shared.is_closed() || observed < started {
                     return Err(Error::Unauthorized);
                 }
                 let response = self
@@ -219,7 +220,7 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
             .await?;
         let now = clock();
         let owner = self.owner.upgrade().ok_or(Error::Unavailable)?;
-        if owner.is_closed() || now < started || now >= self.expires {
+        if owner.is_closed() || now < started {
             return Err(Error::Unauthorized);
         }
         let trust = cnvy::cchr::global_stamp_trust(
@@ -247,10 +248,19 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         Ok(&self.credential)
     }
 
-    /// Original exclusive session deadline, never renewed by these observations.
+    /// Original server session deadline, informational only. The device never orders
+    /// its own clock against it; the server refuses an expired session with a typed
+    /// `Unauthorized`, and the caller renews on that error.
     pub fn expires(&self) -> Result<u64> {
         self.checked_at.ok_or(Error::Unauthorized)?;
         Ok(self.expires)
+    }
+
+    /// Device-local seconds since this lease was received (device clock against device
+    /// clock only). A proactive renewal hint for the caller; never an expiry verdict.
+    pub fn age(&self, now: u64) -> Result<u64> {
+        self.checked_at.ok_or(Error::Unauthorized)?;
+        now.checked_sub(self.received).ok_or(Error::Unauthorized)
     }
 
     /// Inspect this exact retained local session synchronously after an await.
@@ -263,7 +273,6 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         let info = self.held.info.as_ref().ok_or(Error::Unauthorized)?;
         if owner.is_closed()
             || now < floor
-            || now >= self.expires
             || info.role != "member"
             || info.user != self.user
             || info.expires != self.expires

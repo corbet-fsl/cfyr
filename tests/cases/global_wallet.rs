@@ -164,8 +164,28 @@ async fn actual_global_host_and_current_login_key_have_a_terminal_live_clock() {
     assert!(lease.check(|| NOW + 11).is_err());
     drop(lease);
     let mut lease = live.observe_lease(|| NOW).await.unwrap();
-    assert!(lease.check(|| deadline).is_err());
-    assert!(lease.user().is_err());
+    // The device clock at the server deadline decides nothing; the server does.
+    assert!(lease.check(|| deadline).is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn device_clock_skew_never_orders_against_the_server_expiry() {
+    // Rule: a client never orders its own clock against a server timestamp.
+    for skew in [3600i64, -3600] {
+        let device = (NOW as i64 + skew) as u64;
+        let f = Fixture::on(configured_wallet(100).await).await;
+        let mut lease = f.live().observe_lease(|| device).await.unwrap();
+        // Valid on the server: usable whatever the device clock says.
+        assert_eq!(lease.check(|| device + 1).unwrap(), device + 1);
+        lease.stamp_trust(|| device + 2).await.unwrap();
+        // Device-vs-device age since receipt, a proactive renewal hint only.
+        assert_eq!(lease.age(device + 7).unwrap(), 7);
+        // The server's own clock passes the expiry: the SERVER refuses, typed.
+        f.service.clock.set(NOW + 600);
+        let refused = lease.stamp_trust(|| device + 3).await;
+        assert!(matches!(refused, Err(Error::Unauthorized)));
+        assert!(lease.check(|| device + 4).is_err());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -176,10 +196,6 @@ async fn wallet_stamp_trust_comes_from_the_signed_global_status_of_this_session(
     // The genuine wallet's configured stamp key, the open period of its ring.
     assert!(format!("{trust:?}").contains("KeyId(wallet-stamp-1)"));
     assert_eq!(lease.check(|| NOW + 1).unwrap(), NOW + 1);
-    // The session deadline still holds after the read.
-    let deadline = lease.expires().unwrap();
-    assert!(lease.stamp_trust(|| deadline).await.is_err());
-    assert!(lease.user().is_err());
     // A wallet that issues no stamps names no stamp key: no trust.
     let f = Fixture::new().await;
     let mut lease = f.live().observe_lease(|| NOW).await.unwrap();
@@ -368,7 +384,8 @@ async fn actual_pending_read_close_cancellation_and_afterawait_deadline_refuse()
             _ => clock.store(NOW + 9, Ordering::SeqCst),
         }
         f.tls.gate.release.notify_one();
-        assert!(future.await.is_err());
+        // A later device clock is no refusal (outcome 0); only a backwards one is.
+        assert_eq!(future.await.is_ok(), outcome == 0);
     }
     let f = Fixture::new().await;
     let mut live = f.live();

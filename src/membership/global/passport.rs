@@ -59,7 +59,7 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
             })?
             .map_err(|error| if mutation { Error::Reconcile } else { error })?;
         let completed = clock();
-        if completed < started || completed >= self.expires || shared.is_closed() {
+        if completed < started || shared.is_closed() {
             return Err(if mutation {
                 Error::Reconcile
             } else {
