@@ -72,10 +72,7 @@ impl<T: AuthenticatedTransport> LiveGlobalWallet<T> {
                     .clone();
                 let authentication = held.authentication;
                 let sending = clock();
-                if info.role != "member"
-                    || sending < started
-                    || shared.is_closed()
-                {
+                if info.role != "member" || sending < started || shared.is_closed() {
                     return Err(Error::Unauthorized);
                 }
                 // A community's passkey_list has the same shape. Only the
