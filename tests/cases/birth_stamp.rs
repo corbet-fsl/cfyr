@@ -84,10 +84,21 @@ async fn the_birth_grant_issues_the_first_stamp_without_an_assertion_once() {
         .finish_issuance(&cpsd::BlindPassport::from_bytes(&answer).unwrap())
         .unwrap();
     drop(passport);
+    // The device expects the epoch of the signed global status, not one from the reply.
+    let epoch = f
+        .live()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap()
+        .stamp_trust(|| NOW)
+        .await
+        .unwrap()
+        .epoch()
+        .unwrap();
     let (mut pending, request) = stamp_request(&f, &mut holder).await;
     let blind = pending.issue_birth(request, || NOW).await.unwrap();
     holder
-        .finish_stamp(&cpsd::BlindStamp::from_bytes(&blind).unwrap(), NOW)
+        .finish_stamp(&cpsd::BlindStamp::from_bytes(&blind).unwrap(), epoch, NOW)
         .unwrap();
     // Submitted once per continuation, and the birth stamp item is closed for good.
     assert!(pending.issue_birth(vec![1], || NOW).await.is_err());
