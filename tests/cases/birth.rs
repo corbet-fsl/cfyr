@@ -134,10 +134,10 @@ async fn one_ceremony_registration_binds_device_birth_statement_publication_and_
     let bind_signature = |commitment: &[u8; 32]| {
         let payload =
             ckmg::wallet_birth_device_payload(VAULT, &user, &id, commitment, &device).unwrap();
-        ckmg::passkey::sign_device_opened(
+        ckmg::passkey::sign_device_birth(
             &prf,
             "wallet",
-            ckmg::DevicePurpose::WalletBirthDevice,
+            ckmg::DeviceFormat::WalletBirthDevice,
             &payload,
         )
         .unwrap()
@@ -253,10 +253,10 @@ async fn one_ceremony_registration_binds_device_birth_statement_publication_and_
             },
         )
         .unwrap();
-    let passport_signature = ckmg::passkey::sign_device_opened(
+    let passport_signature = ckmg::passkey::sign_device_birth(
         &prf,
         "wallet",
-        ckmg::DevicePurpose::WalletBirthPassport,
+        ckmg::DeviceFormat::WalletBirthPassport,
         &ckmg::wallet_birth_passport_payload(&request),
     )
     .unwrap();

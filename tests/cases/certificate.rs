@@ -761,7 +761,13 @@ impl ckmg::Authority for KeysAuthority {
         Ok(())
     }
 }
-type KeysDevice = ckmg::Keys<KeysStore, KeysClock, ckmg::SystemEntropy, KeysAuthority>;
+/// A member's first lineage made by Keys, and the same PRF-derived device key's enrollment
+/// candidate. Device signatures are typed: the join and the session are signed the way a
+/// device-key member signs them before activation.
+struct KeysDevice {
+    _keys: ckmg::Keys<KeysStore, KeysClock, ckmg::SystemEntropy, KeysAuthority>,
+    candidate: ckmg::UnenrolledCreation,
+}
 
 /// The member's first community lineage made by Keys on the device, and its device key.
 async fn keys_device(community: &str, member: &str) -> (KeysDevice, [u8; 32], ckmg::Receipt) {
@@ -795,12 +801,33 @@ async fn keys_device_with(
     keys.acknowledge(receipt.operation).await.unwrap();
     keys.unlock(&prf, community).await.unwrap();
     let key = *keys.device_public_key().await.unwrap().value();
-    (keys, key, receipt)
+    let candidate = ckmg::EnrollmentSeed::new(
+        ckmg::Binding::new(community, member).unwrap(),
+        &mut ckmg::SystemEntropy,
+    )
+    .unwrap()
+    .seal(
+        &prf,
+        ckmg::DeviceInfo::new("fixture", &[device_seed; 16]).unwrap(),
+        &mut KeysClock,
+        &mut ckmg::SystemEntropy,
+    )
+    .unwrap();
+    (
+        KeysDevice {
+            _keys: keys,
+            candidate,
+        },
+        key,
+        receipt,
+    )
 }
 
-async fn device_sign(keys: &mut KeysDevice, message: &[u8]) -> Vec<u8> {
-    keys.sign_device_ed25519(message, NOW + 600)
-        .await
+async fn device_sign(device: &mut KeysDevice, message: &[u8]) -> Vec<u8> {
+    let format = ckmg::DeviceFormat::of(message).unwrap();
+    device
+        .candidate
+        .sign_device(format, &message[format.tag().len()..])
         .unwrap()
         .to_vec()
 }
