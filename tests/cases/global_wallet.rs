@@ -213,9 +213,42 @@ async fn wallet_stamp_trust_comes_from_the_signed_global_status_of_this_session(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_stamp_epoch_a_device_expects_is_the_signed_global_statuss() {
-    let f = Fixture::on(configured_wallet(100).await).await;
+    let mut f = Fixture::on(configured_wallet(100).await).await;
     let mut lease = f.live().observe_lease(|| NOW).await.unwrap();
     let published = lease.stamp_trust(|| NOW).await.unwrap().epoch().unwrap();
+    // One lease holds the session at a time: end the first before the second.
+    drop(lease);
+    // A stamp is reserved only for a member with a passport: issue one first.
+    f.foyer.call("development_gate", json!({})).await.unwrap();
+    let mut pending = f
+        .live()
+        .observe_lease(|| NOW)
+        .await
+        .unwrap()
+        .passport_challenge(|| NOW)
+        .await
+        .unwrap();
+    let mut holder = cpsd::OpaqueHolder::from_seed(&mut [73; 32]);
+    let request = pending
+        .with_current(
+            || NOW,
+            |_, _, issuer, challenge, _| {
+                holder
+                    .begin_issuance(
+                        &mut cpsd::rand::rngs::OsRng,
+                        &cpsd::IssuerPublicKey::from_bytes(issuer).unwrap(),
+                        &cpsd::IssuanceChallenge::from_bytes(challenge.try_into().unwrap()),
+                    )
+                    .unwrap()
+                    .to_bytes()
+            },
+        )
+        .unwrap();
+    let answer = pending.issue(request, || NOW).await.unwrap();
+    holder
+        .finish_issuance(&cpsd::BlindPassport::from_bytes(&answer).unwrap())
+        .unwrap();
+    drop(pending);
     let mut issuance = f
         .live()
         .observe_lease(|| NOW)
