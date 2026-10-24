@@ -24,8 +24,7 @@ serde = { version = "1", features = ["derive"] }
 futures = "0.3"
 cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "main" }
 cvch = { git = "https://git.corbet.ch/corbet-foss/cvch", branch = "main" }
-# The platform clock-skew tolerance (STAMP_CLOCK_SKEW_SECONDS) and the bind nonce.
-cpsd = { git = "https://git.corbet.ch/corbet-foss/cpsd", branch = "main", default-features = false }
+# The bind nonce.
 getrandom = "0.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

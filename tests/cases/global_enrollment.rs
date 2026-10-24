@@ -298,13 +298,12 @@ async fn successful_bind_final_local_refusal_preserves_unknown_durable_winner() 
     }
 }
 
-/// The device clock is never ordered against the wallet's time: a device up to the skew
-/// tolerance ahead or behind binds; beyond it the bind names the clock (check the device
-/// time), never an unknown outcome.
+/// The device clock is never ordered against the wallet's time: the bind trusts only its
+/// nonce echo, so a device clock off by more than the platform's 300 s stamp tolerance,
+/// ahead or behind, still binds.
 #[tokio::test(flavor = "multi_thread")]
-async fn bind_accepts_device_clock_within_the_skew_and_names_the_clock_beyond_it() {
-    let skew = crate::membership::CLOCK_SKEW_SECONDS;
-    for device in [NOW + (skew - 1), NOW - (skew - 1)] {
+async fn bind_never_compares_the_device_clock_with_the_wallet_time() {
+    for device in [NOW + 301, NOW - 301] {
         let f = registered().await;
         let bound = f
             .live()
@@ -312,28 +311,6 @@ async fn bind_accepts_device_clock_within_the_skew_and_names_the_clock_beyond_it
             .await
             .unwrap()
             .bind_initial_creation(SEED, PUBLICATION, move || device)
-            .await
-            .unwrap();
-        assert_eq!(bound.commitments().unwrap(), (SEED, PUBLICATION));
-    }
-    for device in [NOW + skew + 1, NOW - skew - 1] {
-        let f = registered().await;
-        let result = f
-            .live()
-            .observe_lease(move || device)
-            .await
-            .unwrap()
-            .bind_initial_creation(SEED, PUBLICATION, move || device)
-            .await;
-        assert!(matches!(result, Err(Error::Clock)));
-        // The server's answer was genuine: with the device time corrected, the equal
-        // retry binds.
-        let bound = f
-            .live()
-            .observe_lease(|| NOW)
-            .await
-            .unwrap()
-            .bind_initial_creation(SEED, PUBLICATION, || NOW)
             .await
             .unwrap();
         assert_eq!(bound.commitments().unwrap(), (SEED, PUBLICATION));
