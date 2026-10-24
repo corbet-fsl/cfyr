@@ -1181,7 +1181,13 @@ async fn one_stamp_pairs_a_further_device_key_pending_then_active() {
         )
     };
     let add = pair(&second_key, 5, 21);
-    issue_stamp(&global, &mut member, &mut holder, &[(scope.clone(), add.clone())]).await;
+    issue_stamp(
+        &global,
+        &mut member,
+        &mut holder,
+        &[(scope.clone(), add.clone())],
+    )
+    .await;
     // `device_add`: fresh challenge, passport, the stamp slot and the new key's possession
     // signature of the ADD step over that same challenge.
     let add_step = async |holder: &mut cpsd::OpaqueHolder,
@@ -1247,17 +1253,29 @@ async fn one_stamp_pairs_a_further_device_key_pending_then_active() {
     let (mut third, third_key, _) = keys_device_with("alpha", &pseudonym, 29, 9).await;
     let stolen = add_step(&mut holder, &mut third, third_key, &add, 5, 21).await;
     let stolen = foyer.device_add(stolen).await;
-    assert!(stolen.is_err(), "the stamp covers exactly one key: {stolen:?}");
+    assert!(
+        stolen.is_err(),
+        "the stamp covers exactly one key: {stolen:?}"
+    );
     let replay = add_step(&mut holder, &mut second, second_key, &join_action, 5, 10).await;
-    assert!(foyer.device_add(replay).await.is_err(), "a join stamp never adds a key");
+    assert!(
+        foyer.device_add(replay).await.is_err(),
+        "a join stamp never adds a key"
+    );
     // Activating a key that was never added is refused: it needs the approved PENDING key.
     let early = activate_step(&mut holder, &mut second, second_key).await;
-    assert!(foyer.device_activate(early).await.is_err(), "no activation before the add");
+    assert!(
+        foyer.device_activate(early).await.is_err(),
+        "no activation before the add"
+    );
 
     // Step one registers the key PENDING: it grants nothing, no session opens.
     let request = add_step(&mut holder, &mut second, second_key, &add, 5, 21).await;
     foyer.device_add(request).await.unwrap();
-    assert!(try_session(&mut second, second_key).await.is_err(), "a pending key has no session");
+    assert!(
+        try_session(&mut second, second_key).await.is_err(),
+        "a pending key has no session"
+    );
     // A retry of the same step with the same stamp is idempotent while PENDING.
     let request = add_step(&mut holder, &mut second, second_key, &add, 5, 21).await;
     foyer.device_add(request).await.unwrap();
