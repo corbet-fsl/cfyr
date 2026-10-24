@@ -108,12 +108,18 @@ async fn public_member_and_root_requests_reach_the_real_owner() {
     for name in ["global_warn", "global_suspend"] {
         assert!(action(name).is_none());
         let body = json!({"user":"00000000-0000-4000-8000-0000000000ff","until":NOW+1});
-        assert!(matches!(member.call(name, body.clone()).await, Err(Error::Invalid)));
+        assert!(matches!(
+            member.call(name, body.clone()).await,
+            Err(Error::Invalid)
+        ));
         assert!(matches!(root.call(name, body).await, Err(Error::Invalid)));
     }
     assert!(member.call("passport_challenge", json!({})).await.is_ok());
     // The member alone ends its own access, permanently, with a fresh passkey ceremony.
-    let begin = member.call("global_self_ban_begin", json!({})).await.unwrap();
+    let begin = member
+        .call("global_self_ban_begin", json!({}))
+        .await
+        .unwrap();
     let challenge: ckyh::RequestChallengeResponse =
         serde_json::from_value(begin["options"].clone()).unwrap();
     let credential = enrolled

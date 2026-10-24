@@ -87,7 +87,6 @@ async fn registered_session(service: &Running, passport: &cpsd::Passport) -> Reg
     }
 }
 
-
 /// Authorize a device key as a real member does: `step_up_begin` for exactly this action, the passkey assertion for
 /// that ceremony, then the action with the proof (cvld requires a fresh step-up for every device action).
 async fn authorize_device_with_step_up(

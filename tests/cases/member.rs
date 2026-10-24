@@ -1,7 +1,7 @@
 //! The thin facade carries the original door's real member workflow unchanged.
 use super::*;
-use webauthn_authenticator_rs::AuthenticatorBackend as _;
 use cvld::api::{CredentialResponse, Lobby, PresentationChallenge, PresentationInput, TrustFeed};
+use webauthn_authenticator_rs::AuthenticatorBackend as _;
 
 async fn issue(
     foyer: &mut Foyer<HttpClient>,

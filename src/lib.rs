@@ -25,6 +25,8 @@ use std::rc::Rc;
 pub mod trust;
 /// Device passkey owner. Foyer is its canonical facade home.
 pub use cpky as passkeys;
+/// Passkey-free community sessions opened by the device key's signed nonce.
+pub mod device_session;
 /// Public browser challenge/assertion forwarding and retained session on both targets.
 pub mod login;
 /// Live membership observations through this Foyer's original retained session.
@@ -35,8 +37,6 @@ pub mod policy;
 pub mod registration;
 /// Opaque correlation with one original successful session installation.
 pub mod session;
-/// Passkey-free community sessions opened by the device key's signed nonce.
-pub mod device_session;
 
 /// Step-up proofs for the tests' guarded calls.
 #[cfg(test)]

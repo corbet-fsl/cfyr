@@ -72,7 +72,10 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         Ok(response)
     }
 
-    pub(super) async fn passport_current(&mut self, clock: &mut impl FnMut() -> u64) -> Result<Vec<u8>> {
+    pub(super) async fn passport_current(
+        &mut self,
+        clock: &mut impl FnMut() -> u64,
+    ) -> Result<Vec<u8>> {
         let public = self
             .passport_call("global_public", json!({}), false, clock)
             .await?;

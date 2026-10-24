@@ -292,7 +292,12 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
         .unwrap()
     };
     // A step-up for another action never opens passkey_add, and is spent by the try.
-    let wrong = prove(&mut lease, &mut f.passkeys, StepUpAction::DeviceAuthorize { key: [9u8; 32] }).await;
+    let wrong = prove(
+        &mut lease,
+        &mut f.passkeys,
+        StepUpAction::DeviceAuthorize { key: [9u8; 32] },
+    )
+    .await;
     assert!(lease.passkey_add_begin(wrong, || NOW).await.is_err());
     // A step-up older than the freshness window is refused.
     let stale = prove(&mut lease, &mut f.passkeys, StepUpAction::PasskeyAdd).await;
@@ -336,7 +341,12 @@ async fn passkey_add_and_revoke_need_their_own_fresh_single_use_step_up_and_exac
     // Revoke: a step-up for the add action never opens revoke; its own proof does, once.
     let wrong = prove(&mut lease, &mut f.passkeys, StepUpAction::PasskeyAdd).await;
     assert!(lease.passkey_revoke(&id, wrong, || NOW).await.is_err());
-    let proof = prove(&mut lease, &mut f.passkeys, StepUpAction::PasskeyRevoke { credential: &id }).await;
+    let proof = prove(
+        &mut lease,
+        &mut f.passkeys,
+        StepUpAction::PasskeyRevoke { credential: &id },
+    )
+    .await;
     lease
         .passkey_revoke(&id, proof.clone(), || NOW)
         .await
@@ -359,7 +369,10 @@ async fn a_paired_device_key_stays_pending_without_another_passkeys_approval_and
             .observe_lease(|| NOW)
             .await
             .unwrap();
-        let begin = lease.step_up_begin(StepUpAction::PasskeyAdd, || NOW).await.unwrap();
+        let begin = lease
+            .step_up_begin(StepUpAction::PasskeyAdd, || NOW)
+            .await
+            .unwrap();
         let (assertion, _) = f
             .passkeys
             .sign_in(begin["options"].clone())
@@ -378,7 +391,11 @@ async fn a_paired_device_key_stays_pending_without_another_passkeys_approval_and
             .unwrap()
             .into_parts();
         lease
-            .passkey_add_finish(begin["ceremony"].as_str().unwrap(), credential.into_json(), || NOW)
+            .passkey_add_finish(
+                begin["ceremony"].as_str().unwrap(),
+                credential.into_json(),
+                || NOW,
+            )
             .await
             .unwrap();
     }
@@ -414,7 +431,10 @@ async fn a_paired_device_key_stays_pending_without_another_passkeys_approval_and
     // Pending: accepted, but the key is not live, a revoke proof does not open it, and the
     // same passkey can neither confirm nor approve its own key.
     let proof = prove(&mut lease, StepUpAction::DeviceAuthorize { key }).await;
-    lease.device_pair_authorize(key, proof, || NOW).await.unwrap();
+    lease
+        .device_pair_authorize(key, proof, || NOW)
+        .await
+        .unwrap();
     assert!(!lease.observation().device_keys.contains(&key));
     let wrong = prove(&mut lease, StepUpAction::DeviceAuthorize { key }).await;
     assert!(lease.device_revoke(key, wrong, || NOW).await.is_err());
