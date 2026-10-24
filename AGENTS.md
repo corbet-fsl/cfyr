@@ -12,7 +12,7 @@ records, hidden mutable defaults or permissive authority. Runtime errors stay
 coarse and redact all request/session data. No GPL/AGPL dependency in this FSL
 facade. LICENSE.md defines FSL-1.1-ALv2.
 
-No workstation Cargo, including formatting/metadata. Use bounded public CI for
+No local Cargo, including formatting/metadata. Use bounded public CI for
 public native and actual browser tests; expensive scale/load belongs on Crow.
 First-party dependencies declare branch main and resolve one revision per crate.
 Preserve reproducible Cargo.lock and refresh once per CI run for all jobs.
