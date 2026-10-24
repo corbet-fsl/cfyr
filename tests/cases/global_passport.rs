@@ -77,7 +77,7 @@ async fn issuer_record_reply_cancellation_clock_failure_and_close_never_retry() 
         (None, false),
         (None, true),
         (Some(NOW - 1), false),
-        (Some(NOW + 600), false),
+        (Some(NOW), false),
     ] {
         let mut f = Fixture::new().await;
         f.foyer.call("development_gate", json!({})).await.unwrap();
@@ -98,6 +98,8 @@ async fn issuer_record_reply_cancellation_clock_failure_and_close_never_retry() 
             f.tls.mutation.release.notify_one();
         } else if let Some(at) = cut {
             clock.store(at, Ordering::SeqCst);
+            // The SERVER clock passes the expiry; the server refuses, not the device.
+            f.service.clock.set(NOW + 600);
             f.tls.mutation.release.notify_one();
             assert!(issue.await.is_err());
         } else {

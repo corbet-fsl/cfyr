@@ -233,9 +233,11 @@ async fn lost_bind_reconciles_only_by_eligible_equal_retry_and_ban_refuses() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn global_bind_afterawait_rollback_expiry_and_refresh_cancellation_are_terminal() {
-    for final_time in [NOW - 1, NOW + 600] {
+    for (final_time, server_now) in [(NOW - 1, NOW), (NOW, NOW + 600)] {
         let f = registered().await;
         let lease = f.live().observe_lease(|| NOW).await.unwrap();
+        // The SERVER clock passes the expiry; the server, not the device, refuses.
+        f.service.clock.set(server_now);
         delay(&f.tls, 3);
         let clock = Arc::new(AtomicU64::new(NOW));
         let observed = clock.clone();
@@ -273,10 +275,11 @@ async fn global_bind_afterawait_rollback_expiry_and_refresh_cancellation_are_ter
 
 #[tokio::test(flavor = "multi_thread")]
 async fn successful_bind_final_local_refusal_preserves_unknown_durable_winner() {
-    for final_time in [NOW - 1, NOW + 600] {
+    for (final_time, server_now) in [(NOW - 1, NOW), (NOW, NOW + 600)] {
         let mut f = registered().await;
         let lease = f.live().observe_lease(|| NOW).await.unwrap();
         let mut reads = 0;
+        f.service.clock.set(server_now);
         let result = lease
             .bind_initial_creation(SEED, PUBLICATION, || {
                 reads += 1;
@@ -284,6 +287,16 @@ async fn successful_bind_final_local_refusal_preserves_unknown_durable_winner() 
             })
             .await;
         assert!(matches!(result, Err(Error::Reconcile)));
+        if server_now != NOW {
+            // The server refused the expired lease and ended its session: no winner,
+            // and the device surfaces it (a fresh login is needed), never its own clock.
+            f.service.clock.set(NOW);
+            assert!(matches!(
+                f.live().observe_lease(|| NOW).await,
+                Err(Error::Unauthorized)
+            ));
+            continue;
+        }
         let state = f.foyer.call("initial_creation", json!({})).await.unwrap();
         assert_eq!(state["publication"], json!(PUBLICATION));
         let bound = f
