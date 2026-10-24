@@ -180,11 +180,16 @@ async fn device_clock_skew_never_orders_against_the_server_expiry() {
         lease.stamp_trust(|| device + 2).await.unwrap();
         // Device-vs-device age since receipt, a proactive renewal hint only.
         assert_eq!(lease.age(device + 7).unwrap(), 7);
+        // Renewal while the wallet session is still valid needs no login or step-up:
+        // the same retained session simply yields a fresh lease.
+        drop(lease);
+        let mut lease = f.live().observe_lease(|| device + 3).await.unwrap();
+        assert_eq!(lease.check(|| device + 3).unwrap(), device + 3);
         // The server's own clock passes the expiry: the SERVER refuses, typed.
         f.service.clock.set(NOW + 600);
-        let refused = lease.stamp_trust(|| device + 3).await;
+        let refused = lease.stamp_trust(|| device + 4).await;
         assert!(matches!(refused, Err(Error::Unauthorized)));
-        assert!(lease.check(|| device + 4).is_err());
+        assert!(lease.check(|| device + 5).is_err());
     }
 }
 
