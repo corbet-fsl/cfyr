@@ -778,6 +778,7 @@ impl ckmg::Authority for KeysAuthority {
 struct KeysDevice {
     _keys: ckmg::Keys<KeysStore, KeysClock, ckmg::SystemEntropy, KeysAuthority>,
     candidate: ckmg::UnenrolledCreation,
+    prf: ckmg::passkey::PrfOutput,
 }
 
 /// The member's first community lineage made by Keys on the device, and its device key.
@@ -828,10 +829,25 @@ async fn keys_device_with(
         KeysDevice {
             _keys: keys,
             candidate,
+            prf,
         },
         key,
         receipt,
     )
+}
+
+/// The new key's possession proof of one pairing step, signed from its unlocked opening (the
+/// only signer of `DeviceFormat::PairingPossession`).
+async fn possession_sign(
+    device: &KeysDevice,
+    step: ckmg::PairingStep,
+    challenge: &str,
+    key: &[u8; 32],
+) -> Vec<u8> {
+    let possession = ckmg::PairingPossession::new("alpha", step, challenge, key).unwrap();
+    ckmg::passkey::sign_pairing_possession(&device.prf, "alpha", &possession)
+        .unwrap()
+        .to_vec()
 }
 
 async fn device_sign(device: &mut KeysDevice, message: &[u8]) -> Vec<u8> {
@@ -1207,16 +1223,7 @@ async fn one_stamp_pairs_a_further_device_key_pending_then_active() {
             "device_key": key,
             "session": vec![session; 32],
             "revision": null,
-            "signature": device_sign(
-                device,
-                &crate::device_session::pairing_message(
-                    crate::device_session::ADD_ACTION,
-                    "alpha",
-                    &challenge.challenge,
-                    &key,
-                ),
-            )
-            .await,
+            "signature": possession_sign(device, ckmg::PairingStep::Add, &challenge.challenge, &key).await,
         })
     };
     // `device_activate`: no stamp, only the passport and the ACTIVATE step's signature.
@@ -1227,16 +1234,7 @@ async fn one_stamp_pairs_a_further_device_key_pending_then_active() {
         json!({
             "passport": {"challenge": challenge.challenge, "proof": proof},
             "device_key": key,
-            "signature": device_sign(
-                device,
-                &crate::device_session::pairing_message(
-                    crate::device_session::ACTIVATE_ACTION,
-                    "alpha",
-                    &challenge.challenge,
-                    &key,
-                ),
-            )
-            .await,
+            "signature": possession_sign(device, ckmg::PairingStep::Activate, &challenge.challenge, &key).await,
         })
     };
     let try_session = async |device: &mut KeysDevice, key: [u8; 32]| {
