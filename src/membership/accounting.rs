@@ -36,7 +36,7 @@ pub struct AccountGrantLease<'p, T> {
     grant: Value,
     credential: Vec<u8>,
     device: [u8; 32],
-    enrollment_submitted: bool,
+    enrollment: EnrollmentSends,
     apply_sent: bool,
 }
 
@@ -52,6 +52,13 @@ impl<T> AccountOwner<'_, T> {
         if !self.checked {
             return Err(Error::Unauthorized);
         }
+        self.revalidate(clock)
+    }
+
+    /// The full current-owner validation without the `checked` precondition: it
+    /// re-establishes `checked` only when every check passes again. Used to resume
+    /// after a failed call, never to skip a check.
+    fn revalidate(&mut self, clock: &mut impl FnMut() -> u64) -> Result<u64> {
         self.checked = false;
         let now = self.lease.check(clock)?;
         self.policy.check_origin(&self.lease.owner, &self.origin)?;
@@ -263,7 +270,7 @@ impl<'p, T: AuthenticatedTransport> AccountChallenge<'p, T> {
             grant,
             credential,
             device,
-            enrollment_submitted: false,
+            enrollment: EnrollmentSends::default(),
             apply_sent: false,
         })
     }
@@ -302,6 +309,74 @@ impl<T> AccountGrantLease<'_, T> {
     }
 }
 
+/// The one enrollment request of a lease and its single permitted resend. The
+/// request is stored when first submitted and only ever cloned back out.
+#[derive(Default)]
+struct EnrollmentSends {
+    request: Option<Value>,
+    failed: bool,
+    resent: bool,
+}
+
+impl EnrollmentSends {
+    fn first(&mut self, request: Value) -> Result<Value> {
+        if self.request.is_some() {
+            return Err(Error::Unauthorized);
+        }
+        self.request = Some(request.clone());
+        Ok(request)
+    }
+    fn failed(&mut self) {
+        self.failed = true;
+    }
+    fn resend(&mut self) -> Result<Value> {
+        match &self.request {
+            Some(request) if self.failed && !self.resent => {
+                self.resent = true;
+                Ok(request.clone())
+            }
+            _ => Err(Error::Unauthorized),
+        }
+    }
+}
+
+#[cfg(test)]
+mod enrollment_sends_tests {
+    use super::*;
+
+    #[test]
+    fn one_resend_of_the_identical_first_request_after_a_failure() {
+        let first = json!({"delegation": [1, 2, 3], "n": 7});
+        let mut sends = EnrollmentSends::default();
+        // No resend before any submission.
+        assert!(matches!(sends.resend(), Err(Error::Unauthorized)));
+        assert_eq!(sends.first(first.clone()).unwrap(), first);
+        // No resend while the first submission has not failed.
+        assert!(matches!(sends.resend(), Err(Error::Unauthorized)));
+        sends.failed();
+        let again = sends.resend().unwrap();
+        assert_eq!(
+            serde_json::to_vec(&again).unwrap(),
+            serde_json::to_vec(&first).unwrap()
+        );
+        // A second resend is refused.
+        assert!(matches!(sends.resend(), Err(Error::Unauthorized)));
+    }
+
+    #[test]
+    fn a_different_second_enrollment_is_refused_per_lease() {
+        let mut sends = EnrollmentSends::default();
+        sends.first(json!({"a": 1})).unwrap();
+        assert!(matches!(
+            sends.first(json!({"a": 2})),
+            Err(Error::Unauthorized)
+        ));
+        sends.failed();
+        // The resend still carries the first bytes, never the refused second ones.
+        assert_eq!(sends.resend().unwrap(), json!({"a": 1}));
+    }
+}
+
 impl<T: AuthenticatedTransport> AccountGrantLease<'_, T> {
     /// Submit the original signed delegation once through this same current
     /// member owner. The generated registry validates its exact wire schema;
@@ -312,13 +387,25 @@ impl<T: AuthenticatedTransport> AccountGrantLease<'_, T> {
         delegation: Value,
         mut clock: impl FnMut() -> u64,
     ) -> Result<Value> {
-        if self.enrollment_submitted || !delegation.is_object() {
+        if !delegation.is_object() {
             return Err(Error::Unauthorized);
         }
-        self.enrollment_submitted = true;
-        self.owner
-            .call("account_enroll", delegation, &mut clock)
-            .await
+        let request = self.enrollment.first(delegation)?;
+        let result = self.owner.call("account_enroll", request, &mut clock).await;
+        if result.is_err() {
+            self.enrollment.failed();
+        }
+        result
+    }
+    /// After the first submission ended in Reconcile (the write may or may not have
+    /// been applied), send the EXACT bytes of that first submission once more. The
+    /// owner registry answers an identical replay with the original entry and
+    /// refuses different content. No API takes new bytes; a second resend, a resend
+    /// before a failed first submission, or one after success is refused.
+    pub async fn resend_enrollment(&mut self, mut clock: impl FnMut() -> u64) -> Result<Value> {
+        let request = self.enrollment.resend()?;
+        self.owner.revalidate(&mut clock)?;
+        self.owner.call("account_enroll", request, &mut clock).await
     }
     /// Acquire the actual current common checkpoint through the same retained
     /// HTTPS owner. The fixed omitted slot may install a publication: uncertain
@@ -327,7 +414,7 @@ impl<T: AuthenticatedTransport> AccountGrantLease<'_, T> {
         &mut self,
         mut clock: impl FnMut() -> u64,
     ) -> Result<Value> {
-        if !self.enrollment_submitted {
+        if self.enrollment.request.is_none() {
             return Err(Error::Unauthorized);
         }
         self.owner
