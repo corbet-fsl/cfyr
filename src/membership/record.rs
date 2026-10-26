@@ -119,7 +119,7 @@ impl<T: AuthenticatedTransport> CommonRecordLease<'_, T> {
             self.lease
                 .held
                 .client
-                .forward("passkey_list", serde_json::json!({})),
+                .forward("lobby", serde_json::json!({})),
             registration,
         )
         .await
@@ -137,30 +137,15 @@ impl<T: AuthenticatedTransport> CommonRecordLease<'_, T> {
         {
             return Err(Error::Unauthorized);
         }
-        let mut current = rows
-            .get("passkeys")
-            .and_then(serde_json::Value::as_array)
-            .ok_or(Error::Reconcile)?
-            .iter()
-            .filter(|row| row["current"] == true);
-        let selected = current.next().ok_or(Error::Unauthorized)?;
-        let credential: Vec<u8> = serde_json::from_value(
-            selected
-                .get("credential")
-                .cloned()
-                .ok_or(Error::Reconcile)?,
-        )
-        .map_err(|__cause| {
-            crate::cause::emit(
-                file!(),
-                line!(),
-                "Error::Reconcile",
-                Error::Reconcile,
-                &__cause,
-            )
-        })?;
-        if current.next().is_some() || selected["revoked"] != false || credential != self.credential
-        {
+        // `lobby` is a Member read that device-key and passkey sessions may both make; the
+        // server answers 401 for an expired lease or a revoked device. The retained login
+        // credential is joined to the lease by `check`, so the probe only needs to show that
+        // the same member is still served.
+        let member = rows
+            .get("member_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(Error::Reconcile)?;
+        if member != self.lease.observation.member {
             return Err(Error::Unauthorized);
         }
         self.lease.checked_at = Some(completed);

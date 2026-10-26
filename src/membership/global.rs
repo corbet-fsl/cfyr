@@ -266,24 +266,6 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
     ) -> Result<cnvy::cchr::StampTrust> {
         let started = self.check(&mut clock)?;
         self.checked_at = None;
-        // `global_public` is a Public call and never checks the bearer. No call is
-        // purpose-made for lease validity, so `passkey_list` (Authenticated) is the
-        // authorization probe: the server refuses an expired or revoked lease.
-        // They run in sequence: the client takes `&mut self` and cannot be shared.
-        let listed = self
-            .held
-            .client
-            .forward("passkey_list", serde_json::json!({}))
-            .await?;
-        let current = listed
-            .get("passkeys")
-            .and_then(serde_json::Value::as_array)
-            .ok_or(Error::Reconcile)?
-            .iter()
-            .any(|row| row["current"] == true && row["revoked"] == false);
-        if !current {
-            return Err(Error::Unauthorized);
-        }
         let public = self
             .held
             .client
@@ -308,6 +290,22 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
                 &__cause,
             )
         })?;
+        // `global_public` is a Public call and never checks the bearer. `wallet_device_keys`
+        // (a Member read for any session origin) is the authorization probe: the server
+        // refuses an expired or revoked lease with 401. The client takes `&mut self`, so the
+        // two calls run in sequence.
+        let listed = self
+            .held
+            .client
+            .forward("wallet_device_keys", serde_json::json!({}))
+            .await?;
+        if !listed.get("keys").is_some_and(serde_json::Value::is_array) {
+            return Err(Error::Reconcile);
+        }
+        let now = clock();
+        if owner.is_closed() || now < started {
+            return Err(Error::Unauthorized);
+        }
         self.checked_at = Some(now);
         self.check(&mut clock)?;
         Ok(trust)
