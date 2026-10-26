@@ -62,9 +62,15 @@ impl<T> AccountOwner<'_, T> {
         self.checked = false;
         let now = self.lease.check(clock)?;
         self.policy.check_origin(&self.lease.owner, &self.origin)?;
-        self.policy
-            .with_current(now, |_| ())
-            .map_err(|_| Error::Unauthorized)?;
+        self.policy.with_current(now, |_| ()).map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
         self.checked = true;
         Ok(now)
     }
@@ -81,7 +87,15 @@ impl<T> AccountOwner<'_, T> {
             .with_current(now, |current| {
                 inspect(current, &self.lease.observation, &self.origin, now)
             })
-            .map_err(|_| Error::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?;
         self.checked = true;
         self.check(clock)?;
         Ok(result)
@@ -127,7 +141,15 @@ impl<T: AuthenticatedTransport> AccountOwner<'_, T> {
         // commitment because the request window had elapsed (409, reason expired).
         let response = Abortable::new(self.lease.held.client.forward(action, input), registration)
             .await
-            .map_err(|_| after_send(Error::Unavailable))?
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "after_send Error::Unavailable",
+                    after_send(Error::Unavailable),
+                    &__cause,
+                )
+            })?
             .map_err(|error| match error {
                 Error::Expired => error,
                 error => after_send(error),
@@ -169,7 +191,15 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             .to_owned();
         let signed_request: Vec<u8> =
             serde_json::from_value(value.get("request").cloned().ok_or(Error::Reconcile)?)
-                .map_err(|_| Error::Reconcile)?;
+                .map_err(|__cause| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Reconcile",
+                        Error::Reconcile,
+                        &__cause,
+                    )
+                })?;
         if signed_request.is_empty() || signed_request.len() > 65_536 {
             return Err(Error::Reconcile);
         }
@@ -255,7 +285,15 @@ impl<'p, T: AuthenticatedTransport> AccountChallenge<'p, T> {
                 .cloned()
                 .ok_or(Error::Reconcile)?,
         )
-        .map_err(|_| Error::Reconcile)?;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?;
         if credential.is_empty() || credential.len() > MAX_COMMUNITY_CREDENTIAL_BYTES {
             return Err(Error::Reconcile);
         }
@@ -503,8 +541,10 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         key_package: &[u8],
         mut clock: impl FnMut() -> u64,
     ) -> Result<VoucherRedeemed> {
-        let token = cvch::link::Token::parse(link.trim().trim_start_matches('#'))
-            .map_err(|_| Error::Invalid)?;
+        let token =
+            cvch::link::Token::parse(link.trim().trim_start_matches('#')).map_err(|__cause| {
+                crate::cause::emit(file!(), line!(), "Error::Invalid", Error::Invalid, &__cause)
+            })?;
         let member = self.observation.member.clone();
         let notice = cvch::link::Notice {
             member: member.clone(),
@@ -512,7 +552,9 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             handle: handle.map(str::to_owned),
             key_package: key_package.to_vec(),
         };
-        let request = cvch::link::Request::new(&token, &notice).map_err(|_| Error::Invalid)?;
+        let request = cvch::link::Request::new(&token, &notice).map_err(|__cause| {
+            crate::cause::emit(file!(), line!(), "Error::Invalid", Error::Invalid, &__cause)
+        })?;
         let lobby = self
             .forward_gate(
                 "voucher_redeem",
@@ -832,7 +874,15 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         };
         let response = Abortable::new(self.held.client.forward(action, input), registration)
             .await
-            .map_err(|_| after_send(Error::Unavailable))?
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "after_send Error::Unavailable",
+                    after_send(Error::Unavailable),
+                    &__cause,
+                )
+            })?
             .map_err(after_send)?;
         self.refresh_observation(clock).await.map_err(after_send)?;
         Ok(response)

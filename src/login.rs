@@ -21,7 +21,15 @@ impl<T: Transport> Foyer<T> {
         let value = self
             .call("login_discoverable_begin", serde_json::json!({}))
             .await?;
-        serde_json::from_value(value).map_err(|_| Error::Reconcile)
+        serde_json::from_value(value).map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })
     }
 }
 
@@ -34,7 +42,9 @@ impl<T: SessionTransport> Foyer<T> {
         ceremony: String,
         credential: cpky::PublicCredential,
     ) -> Result<SessionInfo> {
-        let original_id = credential.credential_id().map_err(|_| Error::Invalid)?;
+        let original_id = credential.credential_id().map_err(|__cause| {
+            crate::cause::emit(file!(), line!(), "Error::Invalid", Error::Invalid, &__cause)
+        })?;
         self.authenticate_pinned(
             serde_json::json!({
                 "ceremony": ceremony, "credential": credential.into_json(),

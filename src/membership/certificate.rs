@@ -71,12 +71,28 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Unavailable)??;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })??;
         // The original client already validated the owner's generated schema.
         // These are private field projections, never a second response contract.
         let signed: Vec<u8> =
             serde_json::from_value(response.get("bytes").cloned().ok_or(Error::Reconcile)?)
-                .map_err(|_| Error::Reconcile)?;
+                .map_err(|__cause| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Reconcile",
+                        Error::Reconcile,
+                        &__cause,
+                    )
+                })?;
         let server_checked_at = response
             .get("checked_at")
             .and_then(serde_json::Value::as_u64)
@@ -99,8 +115,24 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
                     certificate.valid_until(),
                 ))
             })
-            .map_err(|_| Error::Unauthorized)?
-            .map_err(|_| Error::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let expires = expires.min(self.observation.expires);
         if completed >= expires || self.credential.as_ref().is_some_and(|id| id != &credential) {
             return Err(Error::Unauthorized);
@@ -203,7 +235,15 @@ impl<'p, T> CertifiedMembershipLease<'p, T> {
             .as_slice()
             .try_into()
             .map(Some)
-            .map_err(|_| Error::Unauthorized)
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })
     }
     /// Actual checked time from this fresh authenticated server response. It is
     /// not memory of any later observation lost during a device restart.
@@ -228,10 +268,15 @@ impl<'p, T> CertifiedMembershipLease<'p, T> {
         inspect: impl FnOnce(&cnvy::cchr::VerifiedCharter) -> R,
     ) -> Result<R> {
         let now = self.check(&mut clock)?;
-        let result = self
-            .policy
-            .with_current(now, inspect)
-            .map_err(|_| Error::Unauthorized)?;
+        let result = self.policy.with_current(now, inspect).map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
         self.check(&mut clock)?;
         Ok(result)
     }
@@ -287,8 +332,24 @@ impl<'p, T> CertifiedMembershipLease<'p, T> {
                 }
                 Ok(certificate.valid_until())
             })
-            .map_err(|_| Error::Unauthorized)?
-            .map_err(|_| Error::Unauthorized)
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })
     }
 
     /// The held community session's own device key, still among the member's live keys of
@@ -310,7 +371,15 @@ impl<'p, T> CertifiedMembershipLease<'p, T> {
         }
         self.policy
             .with_current(now, |current| current.community() != "wallet")
-            .map_err(|_| Error::Unauthorized)?
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?
             .then_some(self.lease.observation.expires)
             .ok_or(Error::Unauthorized)
     }

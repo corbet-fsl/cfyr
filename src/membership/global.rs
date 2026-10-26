@@ -103,8 +103,16 @@ impl<T: AuthenticatedTransport> LiveGlobalWallet<T> {
                 if current.next().is_some() || row["revoked"] != false {
                     return Err(Error::Unauthorized);
                 }
-                let actual: Vec<u8> = serde_json::from_value(row["credential"].clone())
-                    .map_err(|_| Error::Reconcile)?;
+                let actual: Vec<u8> =
+                    serde_json::from_value(row["credential"].clone()).map_err(|__cause| {
+                        crate::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Reconcile",
+                            Error::Reconcile,
+                            &__cause,
+                        )
+                    })?;
                 if actual != credential {
                     return Err(Error::Unauthorized);
                 }
@@ -113,7 +121,15 @@ impl<T: AuthenticatedTransport> LiveGlobalWallet<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Unavailable)??;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })??;
         Ok(GlobalWalletLease {
             owner: Rc::downgrade(&shared),
             held,
@@ -140,7 +156,15 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         // Freshness is this bind's own nonce echoed in the answer, not the device clock:
         // an earlier answer replayed for the same seed and publication cannot carry it.
         let mut nonce = [0u8; 32];
-        getrandom::fill(&mut nonce).map_err(|_| Error::Unavailable)?;
+        getrandom::fill(&mut nonce).map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })?;
         let mut body = serde_json::json!({"seed":seed,"publication":publication,"nonce":nonce});
         if let Some(evidence) = evidence {
             body["evidence"] = serde_json::json!(evidence);
@@ -174,10 +198,26 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
                     .client
                     .forward("initial_publication_bind", body)
                     .await
-                    .map_err(|_| Error::Reconcile)?;
+                    .map_err(|__cause| {
+                        crate::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Reconcile",
+                            Error::Reconcile,
+                            &__cause,
+                        )
+                    })?;
                 let completed = clock();
                 let actual: super::global_initial::InitialResponse =
-                    serde_json::from_value(response).map_err(|_| Error::Reconcile)?;
+                    serde_json::from_value(response).map_err(|__cause| {
+                        crate::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Reconcile",
+                            Error::Reconcile,
+                            &__cause,
+                        )
+                    })?;
                 // Device times are ordered only with device times and server times only
                 // with server times; the device clock never meets the server's.
                 if actual.seed != seed
@@ -194,9 +234,25 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Reconcile)??;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })??;
         self.checked_at = Some(completed);
-        self.check(&mut *clock).map_err(|_| Error::Reconcile)?;
+        self.check(&mut *clock).map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?;
         Ok(())
     }
 
@@ -243,7 +299,15 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
             &passport::bytes(&public, "status")?,
             now,
         )
-        .map_err(|_| Error::Reconcile)?;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?;
         self.checked_at = Some(now);
         self.check(&mut clock)?;
         Ok(trust)

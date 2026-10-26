@@ -277,7 +277,15 @@ impl<T: Transport> LiveMembership<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Unavailable)??;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })??;
         if shared.lifetime.borrow().closed {
             return Err(Error::Unavailable);
         }
@@ -350,7 +358,15 @@ async fn read_held<T: Transport>(
                 return Err(Error::Unauthorized);
             }
             let actual: Vec<u8> =
-                serde_json::from_value(row["credential"].clone()).map_err(|_| Error::Reconcile)?;
+                serde_json::from_value(row["credential"].clone()).map_err(|__cause| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Reconcile",
+                        Error::Reconcile,
+                        &__cause,
+                    )
+                })?;
             if actual != credential {
                 return Err(Error::Unauthorized);
             }
@@ -368,7 +384,15 @@ async fn read_held<T: Transport>(
         return Err(Error::Unauthorized);
     }
     let device_keys = serde_json::from_value(keys.get("keys").cloned().ok_or(Error::Reconcile)?)
-        .map_err(|_| Error::Reconcile)?;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?;
     Ok(HeldObservation {
         observation: Observation {
             member,
@@ -402,7 +426,15 @@ impl<T: Transport> MembershipLease<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Unavailable)??;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })??;
         if observed.authentication != self.authentication
             || observed.user != self.user
             || observed.observation.expires != self.observation.expires

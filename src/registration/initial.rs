@@ -70,7 +70,9 @@ impl FinishContinuation {
     /// Encode only this bounded data envelope for the composer's durable Store.
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         let mut bytes = HEADER.to_vec();
-        bytes.extend(serde_json::to_vec(&self.0).map_err(|_| Error::Invalid)?);
+        bytes.extend(serde_json::to_vec(&self.0).map_err(|__cause| {
+            crate::cause::emit(file!(), line!(), "Error::Invalid", Error::Invalid, &__cause)
+        })?);
         if bytes.len() > MAX_FINISH_BYTES {
             return Err(Error::Invalid);
         }
@@ -82,9 +84,12 @@ impl FinishContinuation {
         if bytes.len() > MAX_FINISH_BYTES {
             return Err(Error::Invalid);
         }
-        let wire: FinishWire =
-            serde_json::from_slice(bytes.strip_prefix(HEADER).ok_or(Error::Invalid)?)
-                .map_err(|_| Error::Invalid)?;
+        let wire: FinishWire = serde_json::from_slice(
+            bytes.strip_prefix(HEADER).ok_or(Error::Invalid)?,
+        )
+        .map_err(|__cause| {
+            crate::cause::emit(file!(), line!(), "Error::Invalid", Error::Invalid, &__cause)
+        })?;
         if wire.origin.is_empty()
             || wire.community.is_empty()
             || wire.ceremony.is_empty()
@@ -120,7 +125,15 @@ fn policy<T>(owner: &Foyer<T>, origin: &str, now: u64) -> Result<(String, u64)> 
         .with_current(now, |charter| {
             (charter.community().to_owned(), charter.valid_until())
         })
-        .map_err(|_| Error::Unauthorized)
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })
 }
 
 impl<T: AuthenticatedTransport> Foyer<T> {
@@ -159,7 +172,15 @@ impl<T: AuthenticatedTransport> Foyer<T> {
                     .await?;
                 let completed = clock();
                 let challenge: InitialChallenge =
-                    serde_json::from_value(response).map_err(|_| Error::Reconcile)?;
+                    serde_json::from_value(response).map_err(|__cause| {
+                        crate::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Reconcile",
+                            Error::Reconcile,
+                            &__cause,
+                        )
+                    })?;
                 let (current, until) = policy(self, &origin, completed)?;
                 let expires = challenge.expires_at.min(deadline).min(until);
                 if shared.is_closed()
@@ -188,7 +209,15 @@ impl<T: AuthenticatedTransport> Foyer<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Unavailable)?
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })?
     }
 
     /// Replay only the exact retained public finish data through the original
@@ -233,10 +262,24 @@ impl<T: AuthenticatedTransport> Foyer<T> {
                 // The original insertion may now be durable. Every local refusal
                 // after this await is reconciliation, never inferred absence.
                 let completed = clock();
-                let (current, until) =
-                    policy(self, &origin, completed).map_err(|_| Error::Reconcile)?;
-                let result: Completed =
-                    serde_json::from_value(response).map_err(|_| Error::Reconcile)?;
+                let (current, until) = policy(self, &origin, completed).map_err(|__cause| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Reconcile",
+                        Error::Reconcile,
+                        &__cause,
+                    )
+                })?;
+                let result: Completed = serde_json::from_value(response).map_err(|__cause| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Reconcile",
+                        Error::Reconcile,
+                        &__cause,
+                    )
+                })?;
                 if shared.is_closed()
                     || held.info.is_some()
                     || held.authentication != authentication
@@ -252,7 +295,15 @@ impl<T: AuthenticatedTransport> Foyer<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Reconcile)?
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?
     }
 }
 
@@ -289,7 +340,9 @@ impl<T: AuthenticatedTransport> PendingInitialRegistration<T> {
                 {
                     return Err(Error::Unauthorized);
                 }
-                let raw_id = credential.credential_id().map_err(|_| Error::Invalid)?;
+                let raw_id = credential.credential_id().map_err(|__cause| {
+                    crate::cause::emit(file!(), line!(), "Error::Invalid", Error::Invalid, &__cause)
+                })?;
                 let finished = FinishContinuation(FinishWire {
                     origin,
                     community,
@@ -308,6 +361,14 @@ impl<T: AuthenticatedTransport> PendingInitialRegistration<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Unavailable)?
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })?
     }
 }

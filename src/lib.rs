@@ -21,6 +21,8 @@ use futures::lock::{MappedMutexGuard, Mutex, MutexGuard};
 use serde_json::Value;
 use std::rc::Rc;
 
+/// Device-side cause logging for flattened errors (development/test builds only).
+pub(crate) mod cause;
 /// Retained original Charter and Envoy composition for public community trust.
 pub mod trust;
 /// Device passkey owner. Foyer is its canonical facade home.

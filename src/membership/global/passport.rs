@@ -13,9 +13,18 @@ pub struct GlobalPassportIssuance<T> {
 }
 
 pub(super) fn bytes(value: &Value, field: &str) -> Result<Vec<u8>> {
-    let result: Vec<u8> =
-        serde_json::from_value(value.get(field).cloned().ok_or(Error::Reconcile)?)
-            .map_err(|_| Error::Reconcile)?;
+    let result: Vec<u8> = serde_json::from_value(
+        value.get(field).cloned().ok_or(Error::Reconcile)?,
+    )
+    .map_err(|__cause| {
+        crate::cause::emit(
+            file!(),
+            line!(),
+            "Error::Reconcile",
+            Error::Reconcile,
+            &__cause,
+        )
+    })?;
     if result.is_empty() || result.len() > 1_048_576 {
         return Err(Error::Reconcile);
     }
@@ -50,12 +59,20 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         }
         let response = Abortable::new(self.held.client.forward(action, input), registration)
             .await
-            .map_err(|_| {
-                if mutation {
-                    Error::Reconcile
-                } else {
-                    Error::Unavailable
-                }
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "if mutation Error::Reconcile else Error::Unavailable",
+                    {
+                        if mutation {
+                            Error::Reconcile
+                        } else {
+                            Error::Unavailable
+                        }
+                    },
+                    &__cause,
+                )
             })?
             .map_err(|error| if mutation { Error::Reconcile } else { error })?;
         let completed = clock();
@@ -110,11 +127,15 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
             .passport_call("passport_challenge", json!({}), true, &mut clock)
             .await?;
         let challenge = bytes(&reply, "bytes")?;
-        if self
-            .passport_current(&mut clock)
-            .await
-            .map_err(|_| Error::Reconcile)?
-            != issuer
+        if self.passport_current(&mut clock).await.map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })? != issuer
         {
             return Err(Error::Reconcile);
         }
@@ -202,7 +223,15 @@ impl<T: AuthenticatedTransport> GlobalPassportIssuance<T> {
                 .lease
                 .passport_current(&mut clock)
                 .await
-                .map_err(|_| Error::Reconcile)?
+                .map_err(|__cause| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Reconcile",
+                        Error::Reconcile,
+                        &__cause,
+                    )
+                })?
                 != self.issuer
             {
                 return Err(Error::Reconcile);

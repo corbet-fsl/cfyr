@@ -123,7 +123,15 @@ impl<T: AuthenticatedTransport> CommonRecordLease<'_, T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Unavailable)??;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })??;
         let completed = clock();
         if completed < started || completed >= self.lease.observation.expires || shared.is_closed()
         {
@@ -142,7 +150,15 @@ impl<T: AuthenticatedTransport> CommonRecordLease<'_, T> {
                 .cloned()
                 .ok_or(Error::Reconcile)?,
         )
-        .map_err(|_| Error::Reconcile)?;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?;
         if current.next().is_some() || selected["revoked"] != false || credential != self.credential
         {
             return Err(Error::Unauthorized);
@@ -184,7 +200,15 @@ impl<T: AuthenticatedTransport> CommonRecordLease<'_, T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Unavailable)??;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })??;
         self.lease.refresh_observation(&mut clock).await?;
         self.refresh_key(&mut clock).await?;
         self.available = true;

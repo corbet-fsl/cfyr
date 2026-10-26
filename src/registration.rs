@@ -102,7 +102,15 @@ impl<T: Transport> Foyer<T> {
         if self.shared.is_closed() {
             return Err(Error::Unavailable);
         }
-        let challenge: Challenge = serde_json::from_value(value).map_err(|_| Error::Reconcile)?;
+        let challenge: Challenge = serde_json::from_value(value).map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?;
         if challenge.ceremony.is_empty() || challenge.user.is_empty() {
             return Err(Error::Reconcile);
         }
@@ -131,7 +139,9 @@ impl<T: Transport> Foyer<T> {
         {
             return Err(Error::Unauthorized);
         }
-        let original_id = credential.credential_id().map_err(|_| Error::Invalid)?;
+        let original_id = credential.credential_id().map_err(|__cause| {
+            crate::cause::emit(file!(), line!(), "Error::Invalid", Error::Invalid, &__cause)
+        })?;
         let value = retained
             .client
             .forward(
@@ -145,7 +155,15 @@ impl<T: Transport> Foyer<T> {
         if self.shared.is_closed() {
             return Err(Error::Unavailable);
         }
-        let completed: Completed = serde_json::from_value(value).map_err(|_| Error::Reconcile)?;
+        let completed: Completed = serde_json::from_value(value).map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?;
         if completed.user != pending.challenge.user {
             return Err(Error::Reconcile);
         }

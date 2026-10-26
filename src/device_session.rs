@@ -38,7 +38,15 @@ impl<T: Transport> Foyer<T> {
         let value = self
             .call("device_session_begin", serde_json::json!({}))
             .await?;
-        serde_json::from_value(value).map_err(|_| Error::Reconcile)
+        serde_json::from_value(value).map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })
     }
 
     /// Join by device key (`device_join`): the passport presentation, the confirmation stamp

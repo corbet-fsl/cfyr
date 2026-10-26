@@ -15,6 +15,10 @@ default = ["http"]
 http = ["cvld/client-http", "cnvy/http"]
 browser = ["cvld/client-browser", "cnvy/browser"]
 ohttp = ["cvld/client-ohttp"]
+# Test only: print the kind of a flattened cause on stderr (`cause: <file>:<line>
+# <what> -> <ErrorKind>`). The e2e device build enables it through the embedding cmsg
+# build; production builds never enable it.
+development-gate = []
 
 [dependencies]
 cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["client"] }

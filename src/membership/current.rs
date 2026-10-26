@@ -27,7 +27,15 @@ pub(super) fn check_community<T>(
                 Ok(())
             }
         })
-        .map_err(|_| Error::Unauthorized)??;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })??;
     lease.checked_at = Some(checked);
     Ok(checked)
 }
@@ -46,7 +54,15 @@ pub(super) fn with_checked_community<T, R>(
         .with_current(checked, |current| {
             inspect(current, &lease.observation, credential, origin, checked)
         })
-        .map_err(|_| Error::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
     lease.checked_at = Some(checked);
     let completed = check_community(lease, policy, origin, credential, &mut clock)?;
     Ok((output, completed))

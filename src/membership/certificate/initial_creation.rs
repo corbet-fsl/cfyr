@@ -57,12 +57,20 @@ impl<'p, T: AuthenticatedTransport> CertifiedMembershipLease<'p, T> {
         }
         let response = Abortable::new(self.lease.held.client.forward(action, body), registration)
             .await
-            .map_err(|_| {
-                if mutation {
-                    Error::Reconcile
-                } else {
-                    Error::Unavailable
-                }
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "if mutation Error::Reconcile else Error::Unavailable",
+                    {
+                        if mutation {
+                            Error::Reconcile
+                        } else {
+                            Error::Unavailable
+                        }
+                    },
+                    &__cause,
+                )
             })??;
         self.check(&mut *clock)
             .map_err(|error| if mutation { Error::Reconcile } else { error })?;
@@ -74,14 +82,30 @@ impl<'p, T: AuthenticatedTransport> CertifiedMembershipLease<'p, T> {
 // the original client. These values are never accepted from a public constructor.
 fn projection(response: &serde_json::Value) -> Result<([u8; 32], Option<[u8; 32]>, u64)> {
     let seed = serde_json::from_value(response.get("seed").cloned().ok_or(Error::Reconcile)?)
-        .map_err(|_| Error::Reconcile)?;
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?;
     let publication = serde_json::from_value(
         response
             .get("publication")
             .cloned()
             .ok_or(Error::Reconcile)?,
     )
-    .map_err(|_| Error::Reconcile)?;
+    .map_err(|__cause| {
+        crate::cause::emit(
+            file!(),
+            line!(),
+            "Error::Reconcile",
+            Error::Reconcile,
+            &__cause,
+        )
+    })?;
     let checked_at = response
         .get("checked_at")
         .and_then(serde_json::Value::as_u64)
@@ -176,7 +200,15 @@ impl<T> InitialCreationLease<'_, T> {
             .certified
             .policy
             .with_current(now, inspect)
-            .map_err(|_| Error::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?;
         self.checked_at = Some(now);
         self.check(&mut clock)?;
         Ok(result)
@@ -203,7 +235,15 @@ impl<T: AuthenticatedTransport> InitialCreationLease<'_, T> {
                     &mut clock,
                 )
                 .await
-                .map_err(|_| Error::Reconcile)?,
+                .map_err(|__cause| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Reconcile",
+                        Error::Reconcile,
+                        &__cause,
+                    )
+                })?,
             _ => {
                 self.certified
                     .initial_request("initial_creation", serde_json::json!({}), false, &mut clock)
@@ -268,7 +308,15 @@ impl<T: AuthenticatedTransport> InitialCreationLease<'_, T> {
             .initial_request("initial_publication_bind", body, true, &mut clock)
             .await?;
         let (seed, observed, checked_at) = projection(&response)?;
-        let completed = self.check(&mut clock).map_err(|_| Error::Reconcile)?;
+        let completed = self.check(&mut clock).map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?;
         if seed != self.seed || observed != Some(publication) || completed < checked_at {
             return Err(Error::Reconcile);
         }

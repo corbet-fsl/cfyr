@@ -84,7 +84,9 @@ impl GlobalFinishContinuation {
     /// Canonical bounded data for durable original Storage, with no secrets.
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         let mut bytes = HEADER.to_vec();
-        bytes.extend(serde_json::to_vec(&self.0).map_err(|_| Error::Invalid)?);
+        bytes.extend(serde_json::to_vec(&self.0).map_err(|__cause| {
+            crate::cause::emit(file!(), line!(), "Error::Invalid", Error::Invalid, &__cause)
+        })?);
         if bytes.len() > MAX_BYTES {
             return Err(Error::Invalid);
         }
@@ -95,9 +97,12 @@ impl GlobalFinishContinuation {
         if bytes.len() > MAX_BYTES {
             return Err(Error::Invalid);
         }
-        let wire: FinishWire =
-            serde_json::from_slice(bytes.strip_prefix(HEADER).ok_or(Error::Invalid)?)
-                .map_err(|_| Error::Invalid)?;
+        let wire: FinishWire = serde_json::from_slice(
+            bytes.strip_prefix(HEADER).ok_or(Error::Invalid)?,
+        )
+        .map_err(|__cause| {
+            crate::cause::emit(file!(), line!(), "Error::Invalid", Error::Invalid, &__cause)
+        })?;
         if wire.origin.is_empty()
             || wire.ceremony.is_empty()
             || wire.account.is_empty()
@@ -163,8 +168,15 @@ impl<T: AuthenticatedTransport> Foyer<T> {
                     .forward("register_begin", json!({"bootstrap":null,"passport":null}))
                     .await?;
                 let completed = clock();
-                let challenge: Challenge =
-                    serde_json::from_value(response).map_err(|_| Error::Reconcile)?;
+                let challenge: Challenge = serde_json::from_value(response).map_err(|__cause| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Reconcile",
+                        Error::Reconcile,
+                        &__cause,
+                    )
+                })?;
                 if completed < observed
                     || shared.is_closed()
                     || held.info.is_some()
@@ -187,7 +199,15 @@ impl<T: AuthenticatedTransport> Foyer<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Unavailable)?
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })?
     }
 
     /// Submit only exact durably retained global finish data. Success conveys no
@@ -237,10 +257,25 @@ impl<T: AuthenticatedTransport> Foyer<T> {
                         json!({"ceremony":wire.ceremony,"credential":wire.credential}),
                     )
                     .await
-                    .map_err(|_| Error::Reconcile)?;
+                    .map_err(|__cause| {
+                        crate::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Reconcile",
+                            Error::Reconcile,
+                            &__cause,
+                        )
+                    })?;
                 let completed = clock();
-                let actual: Completed =
-                    serde_json::from_value(response).map_err(|_| Error::Reconcile)?;
+                let actual: Completed = serde_json::from_value(response).map_err(|__cause| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Reconcile",
+                        Error::Reconcile,
+                        &__cause,
+                    )
+                })?;
                 if completed < observed
                     || completed >= wire.expires_at
                     || shared.is_closed()
@@ -267,7 +302,15 @@ impl<T: AuthenticatedTransport> Foyer<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Reconcile)?
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?
     }
 }
 
@@ -319,11 +362,27 @@ impl<T: AuthenticatedTransport> GlobalRegistrationReservation<T> {
                         json!({"ceremony":self.challenge.ceremony,"seed":seed}),
                     )
                     .await
-                    .map_err(|_| Error::Reconcile)?;
+                    .map_err(|__cause| {
+                        crate::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Reconcile",
+                            Error::Reconcile,
+                            &__cause,
+                        )
+                    })?;
                 self.checked_at.take().ok_or(Error::Unauthorized)?;
                 let completed = clock();
                 let challenge: InitialChallenge =
-                    serde_json::from_value(response).map_err(|_| Error::Reconcile)?;
+                    serde_json::from_value(response).map_err(|__cause| {
+                        crate::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Reconcile",
+                            Error::Reconcile,
+                            &__cause,
+                        )
+                    })?;
                 if shared.is_closed()
                     || held.info.is_some()
                     || held.authentication != self.authentication
@@ -348,7 +407,15 @@ impl<T: AuthenticatedTransport> GlobalRegistrationReservation<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Reconcile)?
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?
     }
 }
 
@@ -385,7 +452,15 @@ impl<T: AuthenticatedTransport> PendingGlobalInitialRegistration<T> {
                     ceremony: self.challenge.ceremony,
                     account: self.challenge.user,
                     seed: self.seed,
-                    raw_id: credential.credential_id().map_err(|_| Error::Invalid)?,
+                    raw_id: credential.credential_id().map_err(|__cause| {
+                        crate::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Invalid",
+                            Error::Invalid,
+                            &__cause,
+                        )
+                    })?,
                     credential: credential.into_json(),
                     checked_at: now,
                     expires_at: self.challenge.expires_at,
@@ -396,6 +471,14 @@ impl<T: AuthenticatedTransport> PendingGlobalInitialRegistration<T> {
             registration,
         )
         .await
-        .map_err(|_| Error::Unavailable)?
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })?
     }
 }

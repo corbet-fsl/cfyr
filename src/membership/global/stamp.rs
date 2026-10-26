@@ -29,11 +29,15 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         let challenge = bytes(&reply, "challenge")?;
         let key = bytes(&reply, "key")?;
         let options = reply.get("options").cloned().ok_or(Error::Reconcile)?;
-        if self
-            .passport_current(&mut clock)
-            .await
-            .map_err(|_| Error::Reconcile)?
-            != issuer
+        if self.passport_current(&mut clock).await.map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })? != issuer
         {
             return Err(Error::Reconcile);
         }
@@ -141,7 +145,15 @@ impl<T: AuthenticatedTransport> GlobalStampIssuance<T> {
                 .lease
                 .passport_current(&mut clock)
                 .await
-                .map_err(|_| Error::Reconcile)?
+                .map_err(|__cause| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Reconcile",
+                        Error::Reconcile,
+                        &__cause,
+                    )
+                })?
                 != self.issuer
             {
                 return Err(Error::Reconcile);
