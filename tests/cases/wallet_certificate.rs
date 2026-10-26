@@ -55,8 +55,6 @@ async fn running() -> Running {
         publication_file: settings.to_str().unwrap().into(),
         signer_max_seconds: SIGNER_SECONDS,
         stamp_key_file: None,
-        stamp_limit: None,
-        stamp_period_seconds: None,
         stamp_replay_seconds: None,
     });
     let clock = Arc::new(TestClock(AtomicU64::new(NOW)));
