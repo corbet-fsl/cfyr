@@ -92,7 +92,10 @@ impl<'p, T: AuthenticatedTransport> CertifiedMembershipLease<'p, T> {
                     },
                     &__cause,
                 )
-            })??;
+            })?
+            .inspect_err(|error| {
+                crate::cause::print(file!(), line!(), "initial_request: forward", error)
+            })?;
         self.check(&mut *clock)
             .map_err(|error| if mutation { Error::Reconcile } else { error })?;
         Ok(response)
@@ -102,22 +105,15 @@ impl<'p, T: AuthenticatedTransport> CertifiedMembershipLease<'p, T> {
 // Only projections of the genuinely generated owner schema, already checked by
 // the original client. These values are never accepted from a public constructor.
 fn projection(response: &serde_json::Value) -> Result<([u8; 32], Option<[u8; 32]>, u64)> {
-    let seed = serde_json::from_value(response.get("seed").cloned().ok_or(Error::Reconcile)?)
-        .map_err(|__cause| {
-            crate::cause::emit(
-                file!(),
-                line!(),
-                "Error::Reconcile",
-                Error::Reconcile,
-                &__cause,
-            )
-        })?;
-    let publication = serde_json::from_value(
-        response
-            .get("publication")
-            .cloned()
-            .ok_or(Error::Reconcile)?,
-    )
+    let seed = serde_json::from_value(response.get("seed").cloned().ok_or_else(|| {
+        crate::cause::emit(
+            file!(),
+            line!(),
+            "projection: no seed",
+            Error::Reconcile,
+            &(),
+        )
+    })?)
     .map_err(|__cause| {
         crate::cause::emit(
             file!(),
@@ -127,10 +123,37 @@ fn projection(response: &serde_json::Value) -> Result<([u8; 32], Option<[u8; 32]
             &__cause,
         )
     })?;
+    let publication =
+        serde_json::from_value(response.get("publication").cloned().ok_or_else(|| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "projection: no publication",
+                Error::Reconcile,
+                &(),
+            )
+        })?)
+        .map_err(|__cause| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "Error::Reconcile",
+                Error::Reconcile,
+                &__cause,
+            )
+        })?;
     let checked_at = response
         .get("checked_at")
         .and_then(serde_json::Value::as_u64)
-        .ok_or(Error::Reconcile)?;
+        .ok_or_else(|| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "projection: no checked_at",
+                Error::Reconcile,
+                &(),
+            )
+        })?;
     Ok((seed, publication, checked_at))
 }
 

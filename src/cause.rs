@@ -28,9 +28,8 @@ pub(crate) fn emit<T: std::fmt::Debug, U>(
 
 /// Print the source's kind on stderr when the development/test feature is enabled,
 /// for sites that cannot route through [`emit`] (a diverging arm body, an early return).
-/// No such site exists in cfyr today; the helper stays for uniformity with cmsg/ckmg.
+/// cfyr uses it to name a passed-through owner-client error (`inspect_err`).
 #[allow(unused_variables)]
-#[allow(dead_code)]
 pub(crate) fn print<T: std::fmt::Debug>(
     file: &'static str,
     line: u32,

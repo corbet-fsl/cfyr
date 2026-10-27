@@ -324,12 +324,23 @@ async fn read_held<T: Transport>(
             let lobby = retained
                 .client
                 .forward("lobby", serde_json::json!({}))
-                .await?;
+                .await
+                .inspect_err(|error| {
+                    crate::cause::print(file!(), line!(), "read_held: forward", error)
+                })?;
             let member = lobby
                 .get("member_id")
                 .and_then(serde_json::Value::as_str)
                 .filter(|member| !member.is_empty())
-                .ok_or(Error::Reconcile)?
+                .ok_or_else(|| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "read_held: no member_id",
+                        Error::Reconcile,
+                        &(),
+                    )
+                })?
                 .to_owned();
             (member, None, "device_keys")
         }
@@ -343,17 +354,31 @@ async fn read_held<T: Transport>(
             retained
                 .client
                 .forward("global_public", serde_json::json!({}))
-                .await?;
+                .await
+                .inspect_err(|error| {
+                    crate::cause::print(file!(), line!(), "read_held: forward", error)
+                })?;
             let response = retained
                 .client
                 .forward("passkey_list", serde_json::json!({}))
-                .await?;
+                .await
+                .inspect_err(|error| {
+                    crate::cause::print(file!(), line!(), "read_held: forward", error)
+                })?;
             // Current is projected from the server's genuine authenticated key,
             // not from membership in an arbitrary list of enrolled credentials.
             let rows = response
                 .get("passkeys")
                 .and_then(serde_json::Value::as_array)
-                .ok_or(Error::Reconcile)?;
+                .ok_or_else(|| {
+                    crate::cause::emit(
+                        file!(),
+                        line!(),
+                        "read_held: no passkeys",
+                        Error::Reconcile,
+                        &(),
+                    )
+                })?;
             let mut current = rows.iter().filter(|row| row["current"] == true);
             let row = current.next().ok_or(Error::Unauthorized)?;
             if current.next().is_some() || row["revoked"] != false {
@@ -380,21 +405,30 @@ async fn read_held<T: Transport>(
     let keys = retained
         .client
         .forward(action, serde_json::json!({}))
-        .await?;
+        .await
+        .inspect_err(|error| crate::cause::print(file!(), line!(), "read_held: forward", error))?;
     let finished = clock();
     if finished < sending || finished >= expires || shared.is_closed() {
         return Err(Error::Unauthorized);
     }
-    let device_keys = serde_json::from_value(keys.get("keys").cloned().ok_or(Error::Reconcile)?)
-        .map_err(|__cause| {
-            crate::cause::emit(
-                file!(),
-                line!(),
-                "Error::Reconcile",
-                Error::Reconcile,
-                &__cause,
-            )
-        })?;
+    let device_keys = serde_json::from_value(keys.get("keys").cloned().ok_or_else(|| {
+        crate::cause::emit(
+            file!(),
+            line!(),
+            "read_held: no keys",
+            Error::Reconcile,
+            &(),
+        )
+    })?)
+    .map_err(|__cause| {
+        crate::cause::emit(
+            file!(),
+            line!(),
+            "Error::Reconcile",
+            Error::Reconcile,
+            &__cause,
+        )
+    })?;
     Ok(HeldObservation {
         observation: Observation {
             member,
