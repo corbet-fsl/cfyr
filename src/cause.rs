@@ -110,3 +110,12 @@ mod tests {
         );
     }
 }
+
+/// Why a lease attempt found its session lifetime unusable (a cause kind for [`emit`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum LeaseLifetime {
+    OwnerDropped,
+    Closed,
+    NoPending,
+    Generation,
+}

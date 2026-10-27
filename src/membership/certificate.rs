@@ -93,7 +93,15 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
         let origin = self.held.client.authenticated_origin()?;
         policy.check_origin(&self.owner, &origin)?;
         let started = self.check(&mut clock)?;
-        let shared = self.owner.upgrade().ok_or(Error::Unavailable)?;
+        let shared = self.owner.upgrade().ok_or_else(|| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "refresh_observation: lease owner dropped",
+                Error::Unavailable,
+                &crate::cause::LeaseLifetime::OwnerDropped,
+            )
+        })?;
         let (abort, registration) = AbortHandle::new_pair();
         {
             let mut lifetime = shared.lifetime.borrow_mut();
@@ -101,7 +109,20 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
                 || lifetime.generation != self._pending.generation
                 || lifetime.pending.is_none()
             {
-                return Err(Error::Unavailable);
+                let state = if lifetime.closed {
+                    crate::cause::LeaseLifetime::Closed
+                } else if lifetime.pending.is_none() {
+                    crate::cause::LeaseLifetime::NoPending
+                } else {
+                    crate::cause::LeaseLifetime::Generation
+                };
+                return Err(crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "refresh_observation: lease lifetime moved",
+                    Error::Unavailable,
+                    &state,
+                ));
             }
             // Preserve this actual attempt's generation while replacing its
             // completed observation waiter with the new certificate waiter.

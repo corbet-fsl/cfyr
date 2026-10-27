@@ -43,7 +43,15 @@ impl<'p, T: AuthenticatedTransport> CertifiedMembershipLease<'p, T> {
         clock: &mut impl FnMut() -> u64,
     ) -> Result<serde_json::Value> {
         self.check(&mut *clock)?;
-        let shared = self.lease.owner.upgrade().ok_or(Error::Unavailable)?;
+        let shared = self.lease.owner.upgrade().ok_or_else(|| {
+            crate::cause::emit(
+                file!(),
+                line!(),
+                "initial_request: lease owner dropped",
+                Error::Unavailable,
+                &crate::cause::LeaseLifetime::OwnerDropped,
+            )
+        })?;
         let (abort, registration) = AbortHandle::new_pair();
         {
             let mut lifetime = shared.lifetime.borrow_mut();
@@ -51,7 +59,20 @@ impl<'p, T: AuthenticatedTransport> CertifiedMembershipLease<'p, T> {
                 || lifetime.generation != self.lease._pending.generation
                 || lifetime.pending.is_none()
             {
-                return Err(Error::Unavailable);
+                let state = if lifetime.closed {
+                    crate::cause::LeaseLifetime::Closed
+                } else if lifetime.pending.is_none() {
+                    crate::cause::LeaseLifetime::NoPending
+                } else {
+                    crate::cause::LeaseLifetime::Generation
+                };
+                return Err(crate::cause::emit(
+                    file!(),
+                    line!(),
+                    "initial_request: lease lifetime moved",
+                    Error::Unavailable,
+                    &state,
+                ));
             }
             lifetime.pending = Some(abort);
         }
