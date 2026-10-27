@@ -18,7 +18,7 @@ struct CheckedCertificate {
 /// No response JSON, supplied certificate or caller timestamp constructs it.
 pub struct CertifiedMembershipLease<'p, T> {
     lease: MembershipLease<T>,
-    policy: &'p mut CurrentPolicy<T>,
+    policy: HeldPolicy<'p, T>,
     signed: Vec<u8>,
     origin: String,
     checked: Option<CheckedCertificate>,
@@ -34,15 +34,58 @@ pub struct RegisteredCertificateLease<'p, T> {
     registration: RegisteredSession<T>,
 }
 
+/// The current policy a certified lease checks against: lent by the caller for `'p`, or owned
+/// by the lease (and dropped with it). Ownership changes nothing about the checks; it lets a
+/// long-lived holder keep the lease without leaking a `&'static mut` policy.
+pub enum HeldPolicy<'p, T> {
+    Borrowed(&'p mut CurrentPolicy<T>),
+    Owned(Box<CurrentPolicy<T>>),
+}
+
+impl<'p, T> From<&'p mut CurrentPolicy<T>> for HeldPolicy<'p, T> {
+    fn from(policy: &'p mut CurrentPolicy<T>) -> Self {
+        Self::Borrowed(policy)
+    }
+}
+
+impl<T> From<CurrentPolicy<T>> for HeldPolicy<'static, T> {
+    fn from(policy: CurrentPolicy<T>) -> Self {
+        Self::Owned(Box::new(policy))
+    }
+}
+
+impl<T> std::ops::Deref for HeldPolicy<'_, T> {
+    type Target = CurrentPolicy<T>;
+    fn deref(&self) -> &CurrentPolicy<T> {
+        match self {
+            Self::Borrowed(policy) => policy,
+            Self::Owned(policy) => policy,
+        }
+    }
+}
+
+impl<T> std::ops::DerefMut for HeldPolicy<'_, T> {
+    fn deref_mut(&mut self) -> &mut CurrentPolicy<T> {
+        match self {
+            Self::Borrowed(policy) => policy,
+            Self::Owned(policy) => policy,
+        }
+    }
+}
+
 impl<T: AuthenticatedTransport> MembershipLease<T> {
     /// Consume this local lease and fetch only through its held original client.
     /// Missing owner-generated action/response metadata refuses before sealing.
     /// Cancellation drops the held session guard; owner closure aborts this call.
     pub async fn passkey_certificate<'p>(
         mut self,
-        policy: &'p mut CurrentPolicy<T>,
+        policy: impl Into<HeldPolicy<'p, T>>,
         mut clock: impl FnMut() -> u64,
-    ) -> Result<CertifiedMembershipLease<'p, T>> {
+    ) -> Result<CertifiedMembershipLease<'p, T>>
+    where
+        T: 'p,
+    {
+        let mut policy = policy.into();
         // This bound is sealed by CVLD to its actual native/browser clients.
         // HTTPS and this instance's retained origin are checked by that owner;
         // schema-valid replies from arbitrary Transport implementations cannot
@@ -160,9 +203,13 @@ impl<T: AuthenticatedTransport> MembershipLease<T> {
     /// a wallet observation or a key no longer live refuses.
     pub async fn device_initial_creation<'p>(
         self,
-        policy: &'p mut CurrentPolicy<T>,
+        policy: impl Into<HeldPolicy<'p, T>>,
         mut clock: impl FnMut() -> u64,
-    ) -> Result<InitialCreationLease<'p, T>> {
+    ) -> Result<InitialCreationLease<'p, T>>
+    where
+        T: 'p,
+    {
+        let mut policy = policy.into();
         let origin = self.held.client.authenticated_origin()?;
         policy.check_origin(&self.owner, &origin)?;
         let mut lease = self;
