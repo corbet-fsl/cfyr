@@ -37,7 +37,38 @@ pub struct AccountGrantLease<'p, T> {
     credential: Vec<u8>,
     device: [u8; 32],
     enrollment: EnrollmentSends,
-    apply_sent: bool,
+    sends: AccountSends,
+}
+
+/// The single-write allowance of one grant lease. A write goes through the original
+/// owner exactly once, because its bytes are the durable outbox and a second send
+/// must carry those same bytes through a reopened lease. A READ of what the operator
+/// already holds must never spend that write: a device that lost the answer reads the
+/// acceptance back and then still has to be able to send the stored request when the
+/// operator holds none, so one lease answers both.
+#[derive(Default)]
+struct AccountSends {
+    write_sent: bool,
+}
+
+impl AccountSends {
+    /// A read-only account request: it claims nothing and changes no state, so it
+    /// never spends the write. The wire must still be one object.
+    fn read(&mut self, wire: &Value) -> Result<()> {
+        if !wire.is_object() {
+            return Err(Error::Unauthorized);
+        }
+        Ok(())
+    }
+
+    /// The one stored write: spent by the first attempt, whatever its outcome.
+    fn write(&mut self, wire: &Value) -> Result<()> {
+        if self.write_sent || !wire.is_object() {
+            return Err(Error::Unauthorized);
+        }
+        self.write_sent = true;
+        Ok(())
+    }
 }
 
 struct AccountOwner<'p, T> {
@@ -309,7 +340,7 @@ impl<'p, T: AuthenticatedTransport> AccountChallenge<'p, T> {
             credential,
             device,
             enrollment: EnrollmentSends::default(),
-            apply_sent: false,
+            sends: AccountSends::default(),
         })
     }
 }
@@ -469,11 +500,53 @@ impl<T: AuthenticatedTransport> AccountGrantLease<'_, T> {
         wire: Value,
         mut clock: impl FnMut() -> u64,
     ) -> Result<Value> {
-        if self.apply_sent || !wire.is_object() {
-            return Err(Error::Unauthorized);
-        }
-        self.apply_sent = true;
+        self.sends.write(&wire)?;
         self.owner.call("account", wire, &mut clock).await
+    }
+    /// Send one READ-ONLY account request through this same held owner and the same
+    /// authorization the stored write uses: never a weaker one, and never a second
+    /// route. A status lookup must be answerable for exactly the state "the operator
+    /// accepted, the device is still pending", and reading it must leave the stored
+    /// write sendable, so this never spends the lease's one write.
+    pub async fn read_account(
+        &mut self,
+        wire: Value,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        self.sends.read(&wire)?;
+        self.owner.call("account", wire, &mut clock).await
+    }
+}
+
+#[cfg(test)]
+mod account_sends_tests {
+    use super::*;
+
+    /// The one case the failed journey row exposed: the device reads the acceptance
+    /// it lost through its own lease, the operator holds none, and the exact retry
+    /// must still be sendable on that same lease. A read that spent the write turned
+    /// that retry into a deterministic `Unauthorized` the client never repeats.
+    #[test]
+    fn a_status_read_never_spends_the_one_write() {
+        let mut sends = AccountSends::default();
+        sends.read(&json!({"action": "status"})).unwrap();
+        sends.read(&json!({"action": "status"})).unwrap();
+        sends.write(&json!({"action": "applyExtended"})).unwrap();
+        assert!(matches!(
+            sends.write(&json!({"action": "applyExtended"})),
+            Err(Error::Unauthorized)
+        ));
+    }
+
+    /// A read is still one object through this owner; nothing else is admitted.
+    #[test]
+    fn a_read_of_something_that_is_not_a_request_is_refused() {
+        let mut sends = AccountSends::default();
+        assert!(matches!(
+            sends.read(&json!("not an object")),
+            Err(Error::Unauthorized)
+        ));
+        assert!(matches!(sends.read(&Value::Null), Err(Error::Unauthorized)));
     }
 }
 
