@@ -53,12 +53,16 @@ struct AccountSends {
 
 impl AccountSends {
     /// A read-only account request: it claims nothing and changes no state, so it
-    /// never spends the write. The wire must still be one object.
+    /// never spends the write. Read-only is decided by the original tagged request
+    /// type, never by the caller choosing this method: the wire must parse as
+    /// exactly one `AccountServiceRequest` and be its `Status` variant. Every other
+    /// variant (a write such as `applyExtended`, or `obligations`) and anything the
+    /// original type refuses is Unauthorized, and nothing is spent by the refusal.
     fn read(&mut self, wire: &Value) -> Result<()> {
-        if !wire.is_object() {
-            return Err(Error::Unauthorized);
+        match serde_json::from_value::<cblc::contracts::AccountServiceRequest>(wire.clone()) {
+            Ok(cblc::contracts::AccountServiceRequest::Status { .. }) => Ok(()),
+            _ => Err(Error::Unauthorized),
         }
-        Ok(())
     }
 
     /// The one stored write: spent by the first attempt, whatever its outcome.
@@ -507,7 +511,9 @@ impl<T: AuthenticatedTransport> AccountGrantLease<'_, T> {
     /// authorization the stored write uses: never a weaker one, and never a second
     /// route. A status lookup must be answerable for exactly the state "the operator
     /// accepted, the device is still pending", and reading it must leave the stored
-    /// write sendable, so this never spends the lease's one write.
+    /// write sendable, so this never spends the lease's one write. It sends only
+    /// the original `Status` request; any other request, a write above all, is
+    /// Unauthorized before anything is sent.
     pub async fn read_account(
         &mut self,
         wire: Value,
@@ -522,6 +528,59 @@ impl<T: AuthenticatedTransport> AccountGrantLease<'_, T> {
 mod account_sends_tests {
     use super::*;
 
+    /// A well-formed original `Status` request, exactly as the device serializes it.
+    fn status() -> Value {
+        serde_json::to_value(cblc::contracts::AccountServiceRequest::Status {
+            grant: grant(),
+            authorization: authorization(),
+            request: status_request(),
+        })
+        .unwrap()
+    }
+
+    fn grant() -> cblc::admission::AdmissionGrant {
+        cblc::admission::AdmissionGrant {
+            version: 1,
+            issuer_key_id: "issuer".into(),
+            community_id: "community".into(),
+            member_id: "member".into(),
+            pseudonym: "00".repeat(48),
+            chat_public_key: "device".into(),
+            policy_digest: "policy".into(),
+            policy_epoch: 1,
+            passport_policy_digest: "passport".into(),
+            issued_at: 1,
+            expires_at: 2,
+            signature: "signature".into(),
+        }
+    }
+
+    fn authorization() -> cblc::admission::DeviceAuthorization {
+        cblc::admission::DeviceAuthorization {
+            version: 1,
+            community_id: "community".into(),
+            member_id: "member".into(),
+            root_public_key: "root".into(),
+            device_public_key: "device".into(),
+            issued_at: 1,
+            expires_at: 2,
+            signature: "signature".into(),
+        }
+    }
+
+    fn status_request() -> cblc::accounting::AccountStatusRequest {
+        cblc::accounting::AccountStatusRequest {
+            community: [1; 32],
+            owner: [2; 32],
+            request_id: None,
+            challenge: [3; 32],
+            chat_public_key: "device".into(),
+            issued_at: 1,
+            expires_at: 2,
+            signature: "signature".into(),
+        }
+    }
+
     /// The one case the failed journey row exposed: the device reads the acceptance
     /// it lost through its own lease, the operator holds none, and the exact retry
     /// must still be sendable on that same lease. A read that spent the write turned
@@ -529,8 +588,8 @@ mod account_sends_tests {
     #[test]
     fn a_status_read_never_spends_the_one_write() {
         let mut sends = AccountSends::default();
-        sends.read(&json!({"action": "status"})).unwrap();
-        sends.read(&json!({"action": "status"})).unwrap();
+        sends.read(&status()).unwrap();
+        sends.read(&status()).unwrap();
         sends.write(&json!({"action": "applyExtended"})).unwrap();
         assert!(matches!(
             sends.write(&json!({"action": "applyExtended"})),
@@ -547,6 +606,40 @@ mod account_sends_tests {
             Err(Error::Unauthorized)
         ));
         assert!(matches!(sends.read(&Value::Null), Err(Error::Unauthorized)));
+    }
+
+    /// `read_account` never spends the write, so it must never carry one: a write
+    /// sent through it would bypass the lease's one-write allowance as often as the
+    /// caller liked. The gate below is the first thing `read_account` does.
+    #[test]
+    fn read_account_refuses_an_apply_extended_write() {
+        let mut sends = AccountSends::default();
+        let mut write = status();
+        write["action"] = json!("applyExtended");
+        write["update"] = json!({});
+        assert!(matches!(sends.read(&write), Err(Error::Unauthorized)));
+        // Nothing was spent by the refusal: the one write is still there.
+        sends.write(&write).unwrap();
+    }
+
+    /// Only `Status` is read-only for this lease. Another variant that parses as an
+    /// original request (here `Obligations`, whose fields equal Status's) is still
+    /// refused, and so is anything the original request type does not accept.
+    #[test]
+    fn read_account_admits_only_the_status_variant() {
+        let mut sends = AccountSends::default();
+        let mut obligations = status();
+        obligations["action"] = json!("obligations");
+        serde_json::from_value::<cblc::contracts::AccountServiceRequest>(obligations.clone())
+            .expect("a well-formed original Obligations request");
+        assert!(matches!(sends.read(&obligations), Err(Error::Unauthorized)));
+        let mut unknown = status();
+        unknown["extra"] = json!(1);
+        assert!(matches!(sends.read(&unknown), Err(Error::Unauthorized)));
+        assert!(matches!(
+            sends.read(&json!({"action": "status"})),
+            Err(Error::Unauthorized)
+        ));
     }
 }
 
