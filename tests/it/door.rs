@@ -197,3 +197,44 @@ async fn community_admin_uses_the_same_registry_and_cannot_become_root() {
     let forced = root.call("platform_set", json!({"setting":{"key":"quota","value":3,"inherit":false,"effective_at":NOW+2},"force":true})).await.unwrap();
     assert_ne!(forced["settings"], changed["settings"]);
 }
+
+/// A device without an enrolling lease (a reopened lease, the wave and record jobs) reads the
+/// current roster through the PUBLIC `account_checkpoint` route, over a Foyer that installed no
+/// session: the real owner answers it exactly as the plain public call. A Foyer that holds a
+/// member session refuses it before anything is sent, and its session is untouched.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_public_roster_read_never_rides_a_member_session() {
+    let wallet = global(100).await;
+    let public = serde_json::from_value(
+        foyer(&wallet, WALLET, None)
+            .call("global_public", json!({}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let community = community("alpha", &public).await;
+    let host = "api.alpha.example.test";
+    let mut anonymous = foyer(&community, host, None);
+    let direct = anonymous
+        .call("account_checkpoint", json!({"slot": null}))
+        .await;
+    let read = anonymous.public_enrollment_checkpoint().await;
+    assert_eq!(format!("{read:?}"), format!("{direct:?}"));
+    assert!(!matches!(read, Err(Error::Unauthorized)), "{read:?}");
+    let mut member = enrol(&wallet, WALLET, None).await;
+    let request = login_request(
+        &wallet,
+        WALLET,
+        &mut member.authenticator,
+        &member.user,
+        &member.credential,
+    )
+    .await;
+    let mut signed_in = foyer(&wallet, WALLET, None);
+    signed_in.authenticate(request).await.unwrap();
+    assert!(matches!(
+        signed_in.public_enrollment_checkpoint().await,
+        Err(Error::Unauthorized)
+    ));
+    signed_in.call("logout", json!({})).await.unwrap();
+}

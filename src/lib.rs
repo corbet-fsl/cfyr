@@ -110,6 +110,25 @@ impl<T: Transport> Foyer<T> {
         }
         retained.client.forward(action, request).await
     }
+
+    /// The current common enrollment roster through the PUBLIC `account_checkpoint`
+    /// route (`{"slot": null}`: the server freezes the current slot for anyone), for a
+    /// device that holds no enrolling lease (a reopened lease, the wave and record jobs).
+    /// Only a Foyer that never installed a member session sends it, so the read is not
+    /// linked to the member; one that holds a session refuses before sending. The
+    /// answer is unverified public data: the caller verifies the signed publication
+    /// exactly as for the enrolling lease.
+    pub async fn public_enrollment_checkpoint(&mut self) -> Result<Value> {
+        let mut retained = self.shared.session.lock().await;
+        if retained.info.is_some() || retained.login_credential.is_some() || retained.device_session
+        {
+            return Err(Error::Unauthorized);
+        }
+        retained
+            .client
+            .forward("account_checkpoint", serde_json::json!({"slot": null}))
+            .await
+    }
 }
 
 impl<T: SessionTransport> Foyer<T> {
