@@ -60,3 +60,12 @@ fresh same-key authentication and original enrollment-seed/current-certificate
 checks; a later refusal does not prove the earlier insertion was absent. These
 methods grant no Keys, Create, Use or recovery authority. The added TLS owner tests
 are authored; native and browser execution remains unqualified.
+
+Wallet session renewal (A13, `wallet_session`): `finish_wallet_login` adds the wallet device key
+K's proof of possession (its signature over `cvld::device_session::wallet_login_message`) to the
+wallet login, and the session then names its family; a device bind under the birth grant adopts
+the family the wallet answers. `renew_wallet_session` renews the retained session by K once it has
+at most `RENEW_WINDOW_SECONDS` (300) left: the server's one-use nonce, K's signature over
+`wallet_message`, and the new session of the same family adopted in place (same passkey
+credential; earlier session bindings end). Foyer never holds K: the caller signs. A failed renewal
+leaves the current session in place; `Unauthorized` means the chain ended (revocation, logout).

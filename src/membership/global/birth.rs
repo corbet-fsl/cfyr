@@ -48,13 +48,21 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         if key == [0; 32] {
             return Err(Error::Invalid);
         }
-        self.passport_call(
-            "wallet_device_authorize",
-            json!({"key":key,"birth_signature":signature.to_vec()}),
-            true,
-            &mut clock,
-        )
-        .await?;
+        let reply = self
+            .passport_call(
+                "wallet_device_authorize",
+                json!({"key":key,"birth_signature":signature.to_vec()}),
+                true,
+                &mut clock,
+            )
+            .await?;
+        // A13: the bind anchored this session's family to K; the session now names it, so K
+        // renews it without a prompt (`Foyer::renew_wallet_session`).
+        if let Some(family) = reply.get("family") {
+            let family: [u8; 32] =
+                serde_json::from_value(family.clone()).map_err(|_| Error::Reconcile)?;
+            self.adopt_family(family)?;
+        }
         Ok(())
     }
 

@@ -40,6 +40,9 @@ pub mod registration;
 /// Opaque correlation with one original successful session installation.
 pub mod session;
 
+/// Wallet session renewal by the wallet device key (A13): no prompt while the device is unlocked.
+pub mod wallet_session;
+
 /// Step-up proofs for the tests' guarded calls.
 #[cfg(test)]
 #[path = "../tests/cases/step_up.rs"]

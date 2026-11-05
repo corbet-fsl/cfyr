@@ -311,6 +311,16 @@ impl<T: AuthenticatedTransport> GlobalWalletLease<T> {
         Ok(trust)
     }
 
+    /// Record the family a device bind on this held session anchored (A13).
+    pub(super) fn adopt_family(&mut self, family: [u8; 32]) -> Result<()> {
+        let info = self.held.info.as_mut().ok_or(Error::Unauthorized)?;
+        if info.user != self.user {
+            return Err(Error::Reconcile);
+        }
+        info.family = Some(family);
+        Ok(())
+    }
+
     /// Exact original global account ID. It is public session metadata, never
     /// community membership, a pseudonym, a certificate or a custody verdict.
     pub fn user(&self) -> Result<&str> {

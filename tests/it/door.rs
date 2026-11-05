@@ -238,3 +238,87 @@ async fn the_public_roster_read_never_rides_a_member_session() {
     ));
     signed_in.call("logout", json!({})).await.unwrap();
 }
+
+/// A13 (ALPHA-CRYPTO-GAPS row A13): a long operation crosses the wallet session lifetime four
+/// times with 0 extra passkey prompts. The wallet login carries the wallet device key K's proof
+/// of possession, so the wallet anchors its family to K (bound to the passkey by a step-up
+/// before); from then on `Foyer::renew_wallet_session` keeps the session alive by K alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_long_operation_crosses_the_wallet_lifetime_with_no_prompt() {
+    use ed25519_dalek::Signer as _;
+    let service = wallet_global(100).await;
+    let mut member = enrol(&service, WALLET, None).await;
+    let k = ed25519_dalek::SigningKey::from_bytes(&[23; 32]);
+    let device = k.verifying_key().to_bytes();
+    let bind = proven(
+        &service,
+        WALLET,
+        &member.session,
+        &mut member.authenticator,
+        json!({"kind":"device_authorize","key":device}),
+        json!({"key":device}),
+    )
+    .await;
+    client(&service, WALLET, Some(&member.session))
+        .call("wallet_device_authorize", bind)
+        .await
+        .unwrap();
+    // The wallet login with K's proof: the only prompt of the whole operation.
+    let mut request = login_request(
+        &service,
+        WALLET,
+        &mut member.authenticator,
+        &member.user,
+        &member.credential,
+    )
+    .await;
+    drop(member.authenticator);
+    let ceremony = request["ceremony"].as_str().unwrap().to_owned();
+    let proof = k.sign(&cvld::device_session::wallet_login_message(
+        WALLET, &ceremony,
+    ));
+    request["device_proof"] = json!({"device_key":device,"signature":proof.to_bytes().to_vec()});
+    let mut api = foyer(&service, WALLET, None);
+    let login = api.authenticate(request).await.unwrap();
+    let family = login.family.expect("the login anchored its family to K");
+    assert_eq!(api.wallet_family().await, Some(family));
+    // K signs the tagged message, as ckmg's `WalletSessionKey::sign` does.
+    let sign = |payload: &[u8]| {
+        let message = [cvld::device_session::WALLET_SESSION_TAG, payload].concat();
+        Some(k.sign(&message).to_bytes())
+    };
+    // The current passkey C stays the session's credential through every renewal.
+    let current = |list: serde_json::Value| {
+        list["passkeys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["current"] == true)
+    };
+    let mut expires = login.expires;
+    // Not due yet: nothing is sent, the session stays.
+    assert!(
+        !api.renew_wallet_session(WALLET, expires - 400, device, sign)
+            .await
+            .unwrap()
+    );
+    for _ in 0..4 {
+        // The operation keeps working on its session until 60 s before the deadline ...
+        let now = expires - 60;
+        service.clock.set(now);
+        assert!(current(api.call("passkey_list", json!({})).await.unwrap()));
+        // ... and the renewer keeps it alive by K, silently.
+        assert!(
+            api.renew_wallet_session(WALLET, now, device, sign)
+                .await
+                .unwrap()
+        );
+        assert_eq!(api.wallet_family().await, Some(family));
+        assert!(current(api.call("passkey_list", json!({})).await.unwrap()));
+        expires = now + 600;
+    }
+    // Far past four lifetimes of the login, the operation still works without a prompt.
+    service.clock.set(expires - 1);
+    assert!(expires - 1 > login.expires + 3 * 500);
+    assert!(current(api.call("passkey_list", json!({})).await.unwrap()));
+}
