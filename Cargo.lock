@@ -1174,7 +1174,7 @@ dependencies = [
 [[package]]
 name = "cchr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=main#5bd6ed6cd6bbc8733bdb9e978cd2a2ab24553da3"
+source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=main#821067cf153569038d00f843bdc7d4756f9b753a"
 dependencies = [
  "blake3",
  "cbcn",
@@ -2213,7 +2213,7 @@ dependencies = [
 [[package]]
 name = "cvch"
 version = "0.2.1"
-source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#f42d1eeb0ec9d8c034a05f8229232921890786b9"
+source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#b75aa86c4c655c53db86b3d7edadc26304aeaaff"
 dependencies = [
  "cfbk",
  "csgn",
