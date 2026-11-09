@@ -64,12 +64,8 @@ blake3 = "1"
 # `tests/browser-fixture.rs` is built and run by CI (`cargo build --example browser-fixture`, .github/workflows/ci.yml).
 # With automatic test discovery it was also a test target, so `--all-targets` compiled and linked it twice.
 [[test]]
-name = "door"
-path = "tests/door.rs"
-
-[[test]]
-name = "trust"
-path = "tests/trust.rs"
+name = "it"
+path = "tests/it/main.rs"
 
 [[example]]
 name = "browser-fixture"

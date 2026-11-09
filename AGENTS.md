@@ -17,9 +17,9 @@ Land: `cargo fmt` in touched repos, rebase on main (never force-push),
 
 Invariants (rule -> enforcing test):
 - One owner registry; admin uses the same path and cannot become root
-  -> `tests/door.rs::community_admin_uses_the_same_registry_and_cannot_become_root`
+  -> `tests/it/door.rs::community_admin_uses_the_same_registry_and_cannot_become_root`
 - Login installs a session exporting only safe identity fields
-  -> `tests/door.rs::trusted_login_installs_a_session_and_exports_only_safe_identity_fields`
+  -> `tests/it/door.rs::trusted_login_installs_a_session_and_exports_only_safe_identity_fields`
 - One resend of the identical first request after failure; a different second
   enrollment is refused per lease
   -> `src/membership/accounting.rs::one_resend_of_the_identical_first_request_after_a_failure`,
@@ -28,11 +28,11 @@ Invariants (rule -> enforcing test):
   -> `tests/cases/registration.rs::receipt_refused_for_foreign_foyer`,
   `continuation_requires_the_exact_first_login_before_binding`
 - Completion never installs expired authority or hides connection failure
-  -> `tests/trust.rs::network_completion_cannot_install_expired_authority_or_hide_connection_failure`
+  -> `tests/it/trust.rs::network_completion_cannot_install_expired_authority_or_hide_connection_failure`
 - Exactly one real charter retained; follows carry no session identifiers
-  -> `tests/trust.rs::foyer_retains_one_real_charter_and_follows_without_session_identifiers`
+  -> `tests/it/trust.rs::foyer_retains_one_real_charter_and_follows_without_session_identifiers`
 - Browser requests keep the owner's public options; no second HTTP protocol
-  -> `tests/door.rs::discoverable_browser_request_keeps_original_public_owner_options`
+  -> `tests/it/door.rs::discoverable_browser_request_keeps_original_public_owner_options`
 
 Pointers: `src/device_session.rs`, `src/registration/`, `src/membership/`,
 `docs/CONTRACT.md`, `docs/LIVE-MEMBERSHIP.md`, `.ci/import-owner-tests.sh`.

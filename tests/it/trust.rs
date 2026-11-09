@@ -1,5 +1,5 @@
 #![cfg(all(feature = "http", not(target_arch = "wasm32")))]
-#[path = "owner/mod.rs"]
+#[path = "../owner/mod.rs"]
 mod support;
 
 use cfyr::{
