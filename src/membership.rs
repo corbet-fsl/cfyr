@@ -29,7 +29,7 @@ use std::{
 };
 
 pub(crate) struct Retained<T> {
-    pub(crate) client: cvld::client::Client<T>,
+    pub(crate) client: cvld_client::client::Client<T>,
     pub(crate) info: Option<SessionInfo>,
     pub(crate) authentication: u64,
     pub(crate) login_credential: Option<Vec<u8>>,
@@ -89,7 +89,7 @@ impl<T: Transport> Shared<T> {
     pub(crate) fn new(transport: T) -> Self {
         Self {
             session: std::sync::Arc::new(Mutex::new(Retained {
-                client: cvld::client::Client::new(transport),
+                client: cvld_client::client::Client::new(transport),
                 info: None,
                 authentication: 0,
                 login_credential: None,
@@ -211,7 +211,7 @@ impl<T> Foyer<T> {
     }
 }
 
-impl<T: cvld::client::AuthenticatedTransport> Foyer<T> {
+impl<T: cvld_client::client::AuthenticatedTransport> Foyer<T> {
     /// Select the original wallet observation route. It requires an actual
     /// typed login, current key and eligible device-owner response; this port
     /// supplies no certified lineage or Keys authority by itself.

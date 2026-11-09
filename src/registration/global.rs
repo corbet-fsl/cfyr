@@ -1,6 +1,6 @@
 //! Original global wallet enrollment, isolated from community membership.
 use super::*;
-use cvld::client::AuthenticatedTransport;
+use cvld_client::client::AuthenticatedTransport;
 use futures::future::Abortable;
 use serde::Serialize;
 

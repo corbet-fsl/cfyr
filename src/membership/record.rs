@@ -1,7 +1,7 @@
 //! Same original member/policy owner around the fixed anonymous binary resource.
 use super::*;
 use crate::policy::CurrentPolicy;
-use cvld::client::AuthenticatedTransport;
+use cvld_client::client::AuthenticatedTransport;
 
 /// A held original community session and its actual current Charter. This owns
 /// no account, Epoch or recipient key. The outer account owner must authenticate

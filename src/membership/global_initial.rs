@@ -1,7 +1,7 @@
 //! Fresh global initial provenance and eligibility from the actual owner bind.
 use super::global::GlobalWalletLease;
 use super::*;
-use cvld::client::AuthenticatedTransport;
+use cvld_client::client::AuthenticatedTransport;
 use serde::Deserialize;
 
 #[derive(Deserialize)]

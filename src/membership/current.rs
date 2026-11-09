@@ -1,7 +1,7 @@
 //! Borrow the actual held community session and its same-owner Charter.
 use super::*;
 use crate::policy::CurrentPolicy;
-use cvld::client::AuthenticatedTransport;
+use cvld_client::client::AuthenticatedTransport;
 
 pub(super) fn check_community<T>(
     lease: &mut MembershipLease<T>,

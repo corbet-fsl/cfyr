@@ -1,7 +1,7 @@
 //! Original account admission through one retained authenticated member session.
 use super::*;
 use crate::policy::CurrentPolicy;
-use cvld::client::AuthenticatedTransport;
+use cvld_client::client::AuthenticatedTransport;
 use serde_json::{Value, json};
 
 /// Largest community credential accepted from the server.

@@ -4,19 +4,19 @@
 #![forbid(unsafe_code)]
 
 #[cfg(all(feature = "browser", target_arch = "wasm32"))]
-pub use cvld::client::BrowserClient;
+pub use cvld_client::client::BrowserClient;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
-pub use cvld::client::HttpClient;
+pub use cvld_client::client::HttpClient;
 /// Door calls through Oblivious HTTP over any cblv `Wire`.
 #[cfg(feature = "ohttp")]
-pub use cvld::client::OhttpClient;
-pub use cvld::client::{
+pub use cvld_client::client::OhttpClient;
+pub use cvld_client::client::{
     Action, SessionInfo, SessionTransport, Transport, forwarding_action as action,
     forwarding_contract as contract,
 };
-pub use cvld::error::{Error, Result};
+pub use cvld_client::error::{Error, Result};
 /// Address rules and the blind creation-token client of the owner contract.
-pub use cvld::{address, creation_token};
+pub use cvld_client::{address, creation_token};
 use futures::lock::{MappedMutexGuard, Mutex, MutexGuard};
 use serde_json::Value;
 use std::rc::Rc;
@@ -156,7 +156,7 @@ impl<T: SessionTransport> Foyer<T> {
     }
 }
 
-impl<T: cvld::client::AuthenticatedTransport> Foyer<T> {
+impl<T: cvld_client::client::AuthenticatedTransport> Foyer<T> {
     /// Fork this Foyer's live wallet passkey session (cvld `session_fork`) into `sibling`, a
     /// Foyer of the same pinned origin, so that each can be held by its own lease. The sibling
     /// gets a fresh server session of the same family: the same account, credential, role and

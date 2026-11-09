@@ -1,6 +1,6 @@
 //! Data-only continuation of original community initial registration.
 use super::*;
-use cvld::client::AuthenticatedTransport;
+use cvld_client::client::AuthenticatedTransport;
 use futures::future::Abortable;
 use serde::Serialize;
 

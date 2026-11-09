@@ -4,13 +4,13 @@ use crate::{Error, Foyer, Opening, Result, SessionInfo, SessionTransport, Transp
 use serde::Deserialize;
 
 /// The join protocol's public constants and signed message, from the original server.
-pub use cvld::device_session::{
+pub use cvld_client::device_session::{
     ACTIVATE_ACTION, ADD_ACTION, GARDEN_ACTION, JOIN_ACTION, PAIR_ACTION, garden_payload,
     join_message, join_payload, pair_payload, pairing_message,
 };
 
 /// The original server's one-use nonce. The signed message is rebuilt with
-/// `cvld::device_session::message(community, &nonce, issued)`.
+/// `cvld_client::device_session::message(community, &nonce, issued)`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Challenge {
@@ -23,12 +23,12 @@ pub struct Challenge {
 impl Challenge {
     /// The exact bytes the device signs: bound to the community, the nonce and the issue time.
     pub fn message(&self, community: &str) -> Vec<u8> {
-        cvld::device_session::message(community, &self.nonce, self.issued)
+        cvld_client::device_session::message(community, &self.nonce, self.issued)
     }
 
     /// The exact bytes the device signs to open an admin session.
     pub fn garden_message(&self, community: &str) -> Vec<u8> {
-        cvld::device_session::garden_message(community, &self.nonce, self.issued)
+        cvld_client::device_session::garden_message(community, &self.nonce, self.issued)
     }
 }
 

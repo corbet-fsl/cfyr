@@ -1,6 +1,6 @@
 //! Global wallet session observation; no community or Keys authority.
 use super::*;
-use cvld::client::AuthenticatedTransport;
+use cvld_client::client::AuthenticatedTransport;
 mod passport;
 pub use passport::GlobalPassportIssuance;
 mod stamp;

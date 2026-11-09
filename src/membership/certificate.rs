@@ -1,7 +1,7 @@
 //! Fresh original server certificate under one held Foyer session and policy.
 use super::*;
 use crate::{policy::CurrentPolicy, registration::RegisteredSession};
-use cvld::client::AuthenticatedTransport;
+use cvld_client::client::AuthenticatedTransport;
 
 mod initial_creation;
 pub use initial_creation::InitialCreationLease;
