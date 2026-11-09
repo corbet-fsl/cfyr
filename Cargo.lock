@@ -1219,6 +1219,7 @@ dependencies = [
  "async-trait",
  "axum",
  "blake3",
+ "cblc",
  "cchr",
  "cgbl",
  "ckmg",
