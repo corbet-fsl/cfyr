@@ -782,7 +782,7 @@ dependencies = [
  "cnvy",
  "cpky",
  "cvch",
- "cvld",
+ "cvld-client",
  "futures",
  "getrandom 0.4.3",
  "serde",
@@ -1301,9 +1301,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "cvld"
+name = "cvld-client"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cvld.git?branch=main#72089ed9d8f50339750418dcc53d74434aeb04db"
+source = "git+https://git.corbet.ch/corbet-fsl/cvld.git?branch=main#80c58561223d193eec33961723f2a85b1b2b944c"
 dependencies = [
  "any_ascii",
  "blind-rsa-signatures",
@@ -4476,7 +4476,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
