@@ -1,5 +1,6 @@
 [package]
 name = "cfyr"
+autotests = false
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.88"
@@ -58,6 +59,17 @@ rcgen = { version = "0.13", features = ["crypto"] }
 ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "main" }
 cchr = { git = "https://git.corbet.ch/corbet-foss/cchr.git", branch = "main" }
 blake3 = "1"
+
+# The integration tests are listed explicitly because the browser fixture is an example, not a test:
+# `tests/browser-fixture.rs` is built and run by CI (`cargo build --example browser-fixture`, .github/workflows/ci.yml).
+# With automatic test discovery it was also a test target, so `--all-targets` compiled and linked it twice.
+[[test]]
+name = "door"
+path = "tests/door.rs"
+
+[[test]]
+name = "trust"
+path = "tests/trust.rs"
 
 [[example]]
 name = "browser-fixture"
