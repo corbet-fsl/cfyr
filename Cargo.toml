@@ -6,7 +6,7 @@ edition = "2024"
 rust-version = "1.88"
 description = "Foyer: device forwarding to the owner-generated cvld door contract"
 license = "FSL-1.1-ALv2"
-repository = "https://git.corbet.ch/corbet-libs/cfyr.git"
+repository = "https://git.corbet.ch/corbet-fsl/cfyr.git"
 readme = "README.md"
 publish = false
 include = ["Cargo.toml", "src/**", "docs/**", "README.md", "LICENSE.md"]
@@ -22,28 +22,28 @@ ohttp = ["cvld/client-ohttp"]
 development-gate = []
 
 [dependencies]
-cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["client"] }
-cnvy = { git = "https://git.corbet.ch/corbet-foss/cnvy.git", branch = "main", default-features = false }
+cvld = { git = "https://git.corbet.ch/corbet-fsl/cvld.git", branch = "main", default-features = false, features = ["client"] }
+cnvy = { git = "https://git.corbet.ch/corbet-libre/cnvy.git", branch = "main", default-features = false }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 futures = "0.3"
-cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "main" }
-cvch = { git = "https://git.corbet.ch/corbet-foss/cvch", branch = "main" }
+cpky = { git = "https://git.corbet.ch/corbet-libre/cpky.git", branch = "main" }
+cvch = { git = "https://git.corbet.ch/corbet-foss/cvch.git", branch = "main" }
 # The bind nonce.
 getrandom = "0.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 url = "2"
-cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "main", features = ["test-authenticator"] }
-cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["development-gate", "client-http"] }
-cmty = { git = "https://git.corbet.ch/corbet-libs/cmty", branch = "main" }
-cpsd = { git = "https://git.corbet.ch/corbet-foss/cpsd", branch = "main", default-features = false, features = ["storage"] }
-csgn = { git = "https://git.corbet.ch/corbet-foss/csgn", branch = "main", features = ["libsql"] }
-cgbl = { git = "https://git.corbet.ch/corbet-libs/cgbl.git", branch = "main" }
-ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main" }
-crgs = { git = "https://git.corbet.ch/corbet-foss/crgs", branch = "main" }
-crlt = { git = "https://git.corbet.ch/corbet-foss/crlt", branch = "main" }
-cpns = { git = "https://git.corbet.ch/corbet-foss/cpns", branch = "main" }
+cpky = { git = "https://git.corbet.ch/corbet-libre/cpky.git", branch = "main", features = ["test-authenticator"] }
+cvld = { git = "https://git.corbet.ch/corbet-fsl/cvld.git", branch = "main", default-features = false, features = ["development-gate", "client-http"] }
+cmty = { git = "https://git.corbet.ch/corbet-fsl/cmty.git", branch = "main" }
+cpsd = { git = "https://git.corbet.ch/corbet-libre/cpsd.git", branch = "main", default-features = false, features = ["storage"] }
+csgn = { git = "https://git.corbet.ch/corbet-libre/csgn.git", branch = "main", features = ["libsql"] }
+cgbl = { git = "https://git.corbet.ch/corbet-fsl/cgbl.git", branch = "main" }
+ckyh = { git = "https://git.corbet.ch/corbet-libre/ckyh.git", branch = "main" }
+crgs = { git = "https://git.corbet.ch/corbet-libre/crgs.git", branch = "main" }
+crlt = { git = "https://git.corbet.ch/corbet-libre/crlt.git", branch = "main" }
+cpns = { git = "https://git.corbet.ch/corbet-libre/cpns.git", branch = "main" }
 ed25519-dalek = { version = "2.2" }
 axum = { version = "0.8.9" }
 tokio = { version = "1", features = ["full"] }
@@ -56,8 +56,8 @@ futures-util = "0.3"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 rcgen = { version = "0.13", features = ["crypto"] }
 # A real Keys `Created` receipt and its genesis stamp evidence for device-key members.
-ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "main" }
-cchr = { git = "https://git.corbet.ch/corbet-foss/cchr.git", branch = "main" }
+ckmg = { git = "https://git.corbet.ch/corbet-libre/ckmg.git", branch = "main" }
+cchr = { git = "https://git.corbet.ch/corbet-libre/cchr.git", branch = "main" }
 blake3 = "1"
 
 # The integration tests are listed explicitly because the browser fixture is an example, not a test:
