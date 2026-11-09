@@ -21,3 +21,5 @@ checks = ["rust"]
 workflow = "ci"
 command = ["bash", ".ci/run-cached.sh"]
 events = ["manual"]
+
+[check_shell]
