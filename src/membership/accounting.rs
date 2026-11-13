@@ -494,6 +494,21 @@ impl<T: AuthenticatedTransport> AccountGrantLease<'_, T> {
             .call("account_checkpoint", json!({"slot": null}), &mut clock)
             .await
     }
+    /// The current common roster for an ACTIVE member (the wave wallet's roster),
+    /// through the same retained HTTPS owner and the same fixed omitted slot as
+    /// `current_enrollment_checkpoint`. An active member reads it through a fresh
+    /// admission that submits no enrollment, so this has no enrollment precondition;
+    /// the owner still revalidates the current lease and origin on the call, no
+    /// caller-selected old slot can be asked, and the response remains unverified
+    /// public data: the consumer verifies the signed publication and its own row.
+    pub async fn current_roster_checkpoint(
+        &mut self,
+        mut clock: impl FnMut() -> u64,
+    ) -> Result<Value> {
+        self.owner
+            .call("account_checkpoint", json!({"slot": null}), &mut clock)
+            .await
+    }
     /// Send the exact stored, already signed account operation once through this
     /// same current member owner. The generated registry validates its wire
     /// schema. A reopened lease may send the same stored bytes, so this does not
