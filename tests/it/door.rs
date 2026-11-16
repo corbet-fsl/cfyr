@@ -322,3 +322,140 @@ async fn a_long_operation_crosses_the_wallet_lifetime_with_no_prompt() {
     assert!(expires - 1 > login.expires + 3 * 500);
     assert!(current(api.call("passkey_list", json!({})).await.unwrap()));
 }
+
+/// A13 F1: a member enrolled on `service`, whose wallet login carried K's proof, so the login's
+/// family is anchored to K. Returns the Foyer holding the session, the login and K.
+async fn anchored_wallet_login(
+    service: &Running,
+    seed: u8,
+) -> (
+    Foyer<HttpClient>,
+    cfyr::SessionInfo,
+    ed25519_dalek::SigningKey,
+) {
+    use ed25519_dalek::Signer as _;
+    let mut member = enrol(service, WALLET, None).await;
+    let k = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
+    let device = k.verifying_key().to_bytes();
+    let bind = proven(
+        service,
+        WALLET,
+        &member.session,
+        &mut member.authenticator,
+        json!({"kind":"device_authorize","key":device}),
+        json!({"key":device}),
+    )
+    .await;
+    client(service, WALLET, Some(&member.session))
+        .call("wallet_device_authorize", bind)
+        .await
+        .unwrap();
+    let mut request = login_request(
+        service,
+        WALLET,
+        &mut member.authenticator,
+        &member.user,
+        &member.credential,
+    )
+    .await;
+    // The login is the only passkey use: the authenticator is gone afterwards.
+    drop(member.authenticator);
+    let ceremony = request["ceremony"].as_str().unwrap().to_owned();
+    let proof = k.sign(&cvld::device_session::wallet_login_message(
+        WALLET, &ceremony,
+    ));
+    request["device_proof"] = json!({"device_key":device,"signature":proof.to_bytes().to_vec()});
+    let mut api = foyer(service, WALLET, None);
+    let login = api.authenticate(request).await.unwrap();
+    assert!(login.family.is_some());
+    (api, login, k)
+}
+
+/// K's signature over the tagged payload, as ckmg's `WalletSessionKey::sign` makes it.
+fn signer(k: &ed25519_dalek::SigningKey) -> impl Fn(&[u8]) -> Option<[u8; 64]> + '_ {
+    use ed25519_dalek::Signer as _;
+    move |payload: &[u8]| {
+        let message = [cvld::device_session::WALLET_SESSION_TAG, payload].concat();
+        Some(k.sign(&message).to_bytes())
+    }
+}
+
+/// A13 F1 (restore, decision 2026-10-23: only revocation ends the chain): a device clock 30 s
+/// AHEAD of the wallet's. At the device's `expires - 300` the wallet still has 330 s left;
+/// the renewal is not due on the wallet's clock, so nothing is spent and the chain goes on.
+/// Over two lifetimes the session renews with no prompt.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_clock_ahead_of_the_wallet_never_ends_the_chain() {
+    const AHEAD: u64 = 30;
+    let service = wallet_global(100).await;
+    let (mut api, login, k) = anchored_wallet_login(&service, 29).await;
+    let device = k.verifying_key().to_bytes();
+    let mut expires = login.expires;
+    for _ in 0..2 {
+        // The wallet: 330 s left. The device: 300 s left, so it asks.
+        service.clock.set(expires - 300 - AHEAD);
+        let device_now = expires - 300;
+        assert!(matches!(
+            api.renew_wallet_session(WALLET, device_now, device, signer(&k))
+                .await,
+            Ok(false)
+        ));
+        assert!(api.call("passkey_list", json!({})).await.is_ok());
+        // Due on the wallet's clock: the device asks again and renews.
+        service.clock.set(expires - 290);
+        assert!(
+            api.renew_wallet_session(WALLET, expires - 290 + AHEAD, device, signer(&k))
+                .await
+                .unwrap()
+        );
+        assert!(api.call("passkey_list", json!({})).await.is_ok());
+        expires = expires - 290 + 600;
+    }
+    service.clock.set(expires - 1);
+    assert!(api.call("passkey_list", json!({})).await.is_ok());
+}
+
+/// A13 F1: a device clock 10 min BEHIND the wallet's. The session expires on the wallet's
+/// clock while the device thinks it has time; the refused call makes the device ask the
+/// wallet's clock once, renew, and resend. From then on the device keeps the wallet's offset,
+/// so the next lifetime renews on time with no refused call. No prompt over two lifetimes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_clock_behind_the_wallet_never_ends_the_chain() {
+    const BEHIND: u64 = 600;
+    let service = wallet_global(100).await;
+    let (mut api, login, k) = anchored_wallet_login(&service, 31).await;
+    let device = k.verifying_key().to_bytes();
+    let expires = login.expires;
+    // Lifetime 1: 60 s left on the wallet; the device sees 660 s and does not ask.
+    service.clock.set(expires - 60);
+    assert!(matches!(
+        api.renew_wallet_session(WALLET, expires - 60 - BEHIND, device, signer(&k))
+            .await,
+        Ok(false)
+    ));
+    // 30 s past the wallet's deadline the call is refused ...
+    service.clock.set(expires + 30);
+    let device_now = expires + 30 - BEHIND;
+    assert!(matches!(
+        api.call("passkey_list", json!({})).await,
+        Err(Error::Unauthorized)
+    ));
+    // ... so the device asks the wallet's clock once and renews; the call then goes through.
+    assert!(
+        api.renew_wallet_session_after_refusal(WALLET, device_now, device, signer(&k))
+            .await
+            .unwrap()
+    );
+    assert!(api.call("passkey_list", json!({})).await.is_ok());
+    let expires = expires + 30 + 600;
+    // Lifetime 2: the device now knows the wallet's offset and renews before the deadline.
+    service.clock.set(expires - 60);
+    assert!(
+        api.renew_wallet_session(WALLET, expires - 60 - BEHIND, device, signer(&k))
+            .await
+            .unwrap()
+    );
+    let expires = expires - 60 + 600;
+    service.clock.set(expires - 1);
+    assert!(api.call("passkey_list", json!({})).await.is_ok());
+}
