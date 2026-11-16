@@ -35,12 +35,12 @@ fn account(user: &str) -> Result<[u8; 16]> {
 
 /// The signed payload: the wallet message minus the tag ckmg prepends.
 fn payload(message: &[u8]) -> &[u8] {
-    &message[cvld::device_session::WALLET_SESSION_TAG.len()..]
+    &message[cvld_client::device_session::WALLET_SESSION_TAG.len()..]
 }
 
 impl<T: SessionTransport> Foyer<T> {
     /// Finish the wallet passkey login with K's proof of possession (M2): `sign` signs the
-    /// payload of `cvld::device_session::wallet_login_message` for the wallet `host` and this
+    /// payload of `cvld_client::device_session::wallet_login_message` for the wallet `host` and this
     /// ceremony. When K is the passkey's current binding, the session names its family and
     /// [`Foyer::renew_wallet_session`] keeps it alive without a prompt.
     pub async fn finish_wallet_login(
@@ -54,7 +54,7 @@ impl<T: SessionTransport> Foyer<T> {
         let original_id = credential.credential_id().map_err(|__cause| {
             crate::cause::emit(file!(), line!(), "Error::Invalid", Error::Invalid, &__cause)
         })?;
-        let message = cvld::device_session::wallet_login_message(host, &ceremony);
+        let message = cvld_client::device_session::wallet_login_message(host, &ceremony);
         let signature = sign(payload(&message)).ok_or(Error::Invalid)?;
         self.authenticate_pinned(
             json!({
@@ -75,7 +75,7 @@ impl<T: SessionTransport> Foyer<T> {
 
     /// Renew the retained wallet session by K when it has at most [`RENEW_WINDOW_SECONDS`] left
     /// at `now` (or has expired): the server's one-use nonce, K's signature (`sign`, over the
-    /// payload of `cvld::device_session::wallet_message`), and the new session of the same
+    /// payload of `cvld_client::device_session::wallet_message`), and the new session of the same
     /// family adopted in place, with the same passkey credential. `Ok(false)` when not due. No
     /// passkey: a session whose family is not anchored is `Unauthorized`, and so is a refused
     /// renewal (revoked K or passkey, rebinding, logout); `Unavailable` is transient.
@@ -111,7 +111,7 @@ impl<T: SessionTransport> Foyer<T> {
                 &__cause,
             )
         })?;
-        let message = cvld::device_session::wallet_message(
+        let message = cvld_client::device_session::wallet_message(
             host,
             &account,
             &family,
