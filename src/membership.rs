@@ -36,6 +36,10 @@ pub(crate) struct Retained<T> {
     /// The retained session was opened by a community device key (`login_credential` is that
     /// key), not by a passkey.
     pub(crate) device_session: bool,
+    /// The wallet's clock minus the device's, in seconds, from the last wallet session renewal
+    /// challenge (A13 F1): the device schedules its renewals on this estimate of the wallet's
+    /// clock.
+    pub(crate) wallet_clock: Option<i64>,
 }
 #[derive(Default)]
 struct Lifetime {
@@ -94,6 +98,7 @@ impl<T: Transport> Shared<T> {
                 authentication: 0,
                 login_credential: None,
                 device_session: false,
+                wallet_clock: None,
             })),
             lifetime: RefCell::default(),
         }

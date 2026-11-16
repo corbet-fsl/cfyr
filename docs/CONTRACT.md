@@ -69,3 +69,9 @@ at most `RENEW_WINDOW_SECONDS` (300) left: the server's one-use nonce, K's signa
 `wallet_message`, and the new session of the same family adopted in place (same passkey
 credential; earlier session bindings end). Foyer never holds K: the caller signs. A failed renewal
 leaves the current session in place; `Unauthorized` means the chain ended (revocation, logout).
+"Left" is judged on the wallet's clock (A13 F1): the device clock only schedules the ask, corrected
+by the wallet's offset from the last challenge, and the challenge's own `issued` time decides, so a
+device clock ahead of the wallet's never spends a renewal the wallet would refuse. After the wallet
+refused a call, `renew_wallet_session_after_refusal` asks the wallet's clock whatever the device
+clock says and renews once if it is due there (a device clock behind the wallet's lets the session
+expire first).

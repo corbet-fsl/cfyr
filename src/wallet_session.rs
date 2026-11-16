@@ -73,12 +73,15 @@ impl<T: SessionTransport> Foyer<T> {
         retained.info.as_ref().and_then(|info| info.family)
     }
 
-    /// Renew the retained wallet session by K when it has at most [`RENEW_WINDOW_SECONDS`] left
-    /// at `now` (or has expired): the server's one-use nonce, K's signature (`sign`, over the
-    /// payload of `cvld_client::device_session::wallet_message`), and the new session of the same
-    /// family adopted in place, with the same passkey credential. `Ok(false)` when not due. No
-    /// passkey: a session whose family is not anchored is `Unauthorized`, and so is a refused
-    /// renewal (revoked K or passkey, rebinding, logout); `Unavailable` is transient.
+    /// Renew the retained wallet session by K once it has at most [`RENEW_WINDOW_SECONDS`] left
+    /// (or has expired) on the WALLET's clock: the server's one-use nonce, K's signature (`sign`,
+    /// over the payload of `cvld_client::device_session::wallet_message`), and the new session of
+    /// the same family adopted in place, with the same passkey credential. The device clock
+    /// (`now`) only schedules the ask, corrected by the wallet's offset from the last challenge;
+    /// the challenge's own time decides, so a device clock ahead of the wallet's never spends a
+    /// renewal the wallet refuses (A13 F1). `Ok(false)` when not due. No passkey: a session whose
+    /// family is not anchored is `Unauthorized`, and so is a refused renewal (revoked K or
+    /// passkey, rebinding, logout); `Unavailable` is transient.
     pub async fn renew_wallet_session(
         &mut self,
         host: &str,
@@ -86,13 +89,42 @@ impl<T: SessionTransport> Foyer<T> {
         device_key: [u8; 32],
         sign: impl FnOnce(&[u8]) -> Option<[u8; 64]>,
     ) -> Result<bool> {
+        self.renew_wallet(host, now, device_key, sign, false).await
+    }
+
+    /// The wallet refused a call with the retained session: a device clock behind the wallet's
+    /// lets the session expire before the device thinks it is due. Ask the wallet's clock
+    /// (whatever the device clock says) and renew once if it is due there, as
+    /// [`Foyer::renew_wallet_session`] does (A13 F1). `Ok(false)`: not due on the wallet's
+    /// clock, so the refusal had another cause.
+    pub async fn renew_wallet_session_after_refusal(
+        &mut self,
+        host: &str,
+        now: u64,
+        device_key: [u8; 32],
+        sign: impl FnOnce(&[u8]) -> Option<[u8; 64]>,
+    ) -> Result<bool> {
+        self.renew_wallet(host, now, device_key, sign, true).await
+    }
+
+    async fn renew_wallet(
+        &mut self,
+        host: &str,
+        now: u64,
+        device_key: [u8; 32],
+        sign: impl FnOnce(&[u8]) -> Option<[u8; 64]>,
+        refused: bool,
+    ) -> Result<bool> {
         let mut retained = self.shared.session.lock().await;
         let info = retained.info.clone().ok_or(Error::Unauthorized)?;
         let family = info.family.ok_or(Error::Unauthorized)?;
         if retained.device_session || not_member(&info.role) {
             return Err(Error::Unauthorized);
         }
-        if info.expires > now.saturating_add(RENEW_WINDOW_SECONDS) {
+        // The device's estimate of the wallet's clock schedules the ask; after a refusal the
+        // wallet is always asked.
+        let estimate = wallet_time(now, retained.wallet_clock);
+        if !refused && info.expires > estimate.saturating_add(RENEW_WINDOW_SECONDS) {
             return Ok(false);
         }
         let account = account(&info.user)?;
@@ -111,6 +143,12 @@ impl<T: SessionTransport> Foyer<T> {
                 &__cause,
             )
         })?;
+        // The wallet's clock decides; its offset schedules the next ask. Not due there: nothing
+        // more is sent (the unused nonce lapses on its own) and the session stays.
+        retained.wallet_clock = Some(clock_offset(challenge.issued, now));
+        if info.expires > challenge.issued.saturating_add(RENEW_WINDOW_SECONDS) {
+            return Ok(false);
+        }
         let message = cvld_client::device_session::wallet_message(
             host,
             &account,
@@ -154,6 +192,24 @@ fn not_member(role: &str) -> bool {
     role != "member"
 }
 
+/// The wallet's clock minus the device's (`issued` is the wallet's time, `now` the device's).
+fn clock_offset(issued: u64, now: u64) -> i64 {
+    let offset = i128::from(issued) - i128::from(now);
+    i64::try_from(offset).unwrap_or(if offset < 0 { i64::MIN } else { i64::MAX })
+}
+
+/// The device's estimate of the wallet's clock: `now` corrected by the last known offset.
+fn wallet_time(now: u64, offset: Option<i64>) -> u64 {
+    match offset {
+        Some(offset) => now.checked_add_signed(offset).unwrap_or(if offset < 0 {
+            0
+        } else {
+            u64::MAX
+        }),
+        None => now,
+    }
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -166,5 +222,20 @@ mod tests {
         );
         assert!(account("00010203040506070809").is_err());
         assert!(account("0001020x-0405-0607-0809-0a0b0c0d0e0f").is_err());
+    }
+
+    #[test]
+    fn the_wallet_clock_estimate_follows_the_last_offset_in_both_directions() {
+        assert_eq!(wallet_time(1_000, None), 1_000);
+        // Device 30 s ahead of the wallet, then 600 s behind.
+        assert_eq!(clock_offset(970, 1_000), -30);
+        assert_eq!(wallet_time(1_000, Some(clock_offset(970, 1_000))), 970);
+        assert_eq!(clock_offset(1_600, 1_000), 600);
+        assert_eq!(wallet_time(1_000, Some(600)), 1_600);
+        // Out-of-range offsets saturate instead of wrapping.
+        assert_eq!(clock_offset(u64::MAX, 0), i64::MAX);
+        assert_eq!(clock_offset(0, u64::MAX), i64::MIN);
+        assert_eq!(wallet_time(10, Some(-20)), 0);
+        assert_eq!(wallet_time(u64::MAX - 1, Some(5)), u64::MAX);
     }
 }
