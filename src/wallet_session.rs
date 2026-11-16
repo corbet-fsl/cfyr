@@ -201,11 +201,10 @@ fn clock_offset(issued: u64, now: u64) -> i64 {
 /// The device's estimate of the wallet's clock: `now` corrected by the last known offset.
 fn wallet_time(now: u64, offset: Option<i64>) -> u64 {
     match offset {
-        Some(offset) => now.checked_add_signed(offset).unwrap_or(if offset < 0 {
-            0
-        } else {
-            u64::MAX
-        }),
+        Some(offset) => {
+            now.checked_add_signed(offset)
+                .unwrap_or(if offset < 0 { 0 } else { u64::MAX })
+        }
         None => now,
     }
 }
